@@ -1,0 +1,35 @@
+# Build
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Results and reports (generated — not committed)
+results/
+final_report/
+*.csv
+*.png
+*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.tmp

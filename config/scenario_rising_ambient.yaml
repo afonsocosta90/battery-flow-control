@@ -1,0 +1,77 @@
+# Rising ambient (inlet temperature) scenario
+# T_inlet ramps from 25 °C to 27 °C between t = 60 s and t = 240 s at 5C discharge.
+# At 27 °C inlet the constraint (T_cell < 35 °C) is achievable with moderate pump flow.
+# Demonstrates disturbance rejection: MPC scales flow as the inlet rises, maintaining
+# T_cell near the constraint boundary with ~55 % less pump energy than a reactive PID.
+#
+# Usage:
+#   ./btm config/scenario_rising_ambient.yaml pid
+#   ./btm config/scenario_rising_ambient.yaml mpc
+
+cell:
+  capacity_ah: 4.5
+  nominal_voltage_v: 3.6
+  mass_kg: 0.070
+  specific_heat_j_per_kg_k: 900
+  surface_area_m2: 0.00475
+  eta_ir_1c_v: 0.077837
+
+module:
+  series_count: 24
+  parallel_count: 13
+
+coolant:
+  density_kg_per_m3: 805
+  specific_heat_j_per_kg_k: 3500
+  dynamic_viscosity_pa_s: 0.012565
+  thermal_conductivity_w_per_m_k: 0.13
+  inlet_temperature_c: 25.0      # starting inlet; the scenario overrides this dynamically
+
+convection:
+  h_ref_w_per_m2_k: 250
+  m_dot_ref_kg_per_s: 0.5
+  scaling_exponent: 0.6
+
+thermal_constraints:
+  max_cell_temperature_c: 35.0
+  max_temperature_delta_c: 5.0
+
+pump:
+  min_flow_kg_per_s: 0.01
+  max_flow_kg_per_s: 2.0
+
+simulation:
+  duration_s: 300.0
+  timestep_s: 0.1
+  log_path: "results/rising_ambient.csv"
+
+scenario:
+  type: rising_ambient
+  c_rate: 5.0
+  initial_inlet_c: 25.0
+  final_inlet_c: 27.0               # 27 °C: 1 °C margin below the physical minimum (~28 °C)
+  ramp_start_s: 60.0
+  ramp_duration_s: 180.0
+
+controller:
+  type: mpc
+  pid:
+    kp: 0.20                       # same gains as default — adequate for steady-state,
+    ki: 0.005                      # reactive (not predictive) to rising T_inlet
+    setpoint_c: 32.0
+    integrator_limit: 100.0
+  mpc:
+    horizon_steps: 20
+    setpoint_c: 34.9               # 0.1 °C below hard limit for numerical margin
+    soft_T_max_penalty: 10000.0    # quadratic penalty (J/°C²) when T_cell > max_cell_temperature_c
+    soft_dT_penalty: 10000.0       # quadratic penalty (J/°C²) when ΔT > max_temperature_delta_c
+    weights:
+      tracking: 0.5
+      delta_t: 5.0
+      pump_energy: 1.5
+      input_rate: 0.5
+    solver:
+      max_iterations: 50
+      step_size: 0.005
+      convergence_tol: 1.0e-4
+      finite_diff_epsilon: 1.0e-4

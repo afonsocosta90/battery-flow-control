@@ -1,0 +1,67 @@
+# Battery Thermal MPC — default configuration (single source of truth)
+# Molicel INR-21700-P45B + Shell E5 TM 410 immersion cooling
+# All physical parameters, controller tuning, and scenario definitions live here.
+
+cell:                              # Molicel INR-21700-P45B (datasheet + L-M fit)
+  capacity_ah: 4.5
+  nominal_voltage_v: 3.6
+  mass_kg: 0.070
+  specific_heat_j_per_kg_k: 900    # typical Li-ion cylindrical
+  surface_area_m2: 0.00475         # 2πrh + 2πr²
+  eta_ir_1c_v: 0.077837            # from Levenberg-Marquardt cell model fit
+
+module:
+  series_count: 24
+  parallel_count: 13
+
+coolant:                           # Shell E5 TM 410
+  density_kg_per_m3: 805
+  specific_heat_j_per_kg_k: 3500
+  dynamic_viscosity_pa_s: 0.012565
+  thermal_conductivity_w_per_m_k: 0.13
+  inlet_temperature_c: 25.0
+
+convection:
+  h_ref_w_per_m2_k: 250            # calibrated to 5C nominal scenario peak ~30 °C
+  m_dot_ref_kg_per_s: 0.5
+  scaling_exponent: 0.6
+
+thermal_constraints:
+  max_cell_temperature_c: 35.0
+  max_temperature_delta_c: 5.0
+
+pump:
+  min_flow_kg_per_s: 0.01
+  max_flow_kg_per_s: 2.0
+
+simulation:
+  duration_s: 600.0
+  timestep_s: 0.1
+  log_path: "results/run.csv"
+
+scenario:
+  type: constant_c_rate            # constant_c_rate | step_transient | rising_ambient
+  c_rate: 5.0
+
+controller:
+  type: mpc                        # pid | mpc
+  pid:
+    kp: 0.20                       # tuned to satisfy constraint with moderate over-cooling
+    ki: 0.005
+    setpoint_c: 32.0               # targets 32 °C → over-cools ~3 °C → excess pump energy
+    integrator_limit: 100.0
+  mpc:
+    horizon_steps: 20
+    setpoint_c: 34.9               # track 0.1 °C below hard limit — numerical margin
+    soft_T_max_penalty: 10000.0    # quadratic penalty (J/°C²) when T_cell > max_cell_temperature_c
+    soft_dT_penalty: 10000.0       # quadratic penalty (J/°C²) when ΔT > max_temperature_delta_c
+    weights:
+      tracking: 0.5                # moderate tracking cost near limit
+      delta_t: 5.0                 # penalise inter-cell gradient
+      pump_energy: 1.5             # strong incentive to minimise flow
+      input_rate: 0.5              # smooth actuator
+    solver:
+      max_iterations: 50
+      step_size: 0.005
+      convergence_tol: 1e-4
+      finite_diff_epsilon: 1e-4
