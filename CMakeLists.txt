@@ -20,6 +20,13 @@ endif()
 
 # Dependencies
 find_package(yaml-cpp REQUIRED)
+# yaml-cpp < 0.8.0 (Ubuntu 22.04 ships 0.7.0) exports target "yaml-cpp" without a namespace;
+# 0.8.0+ (Homebrew) exports "yaml-cpp::yaml-cpp".  Provide the alias so the rest of this file
+# can always use the namespaced form.
+if(NOT TARGET yaml-cpp::yaml-cpp)
+    add_library(yaml-cpp::yaml-cpp ALIAS yaml-cpp)
+endif()
+
 find_package(Eigen3 REQUIRED)  # header-only; version relaxed for Homebrew packaging
 find_package(GTest REQUIRED)
 
