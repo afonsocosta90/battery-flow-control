@@ -1,6 +1,7 @@
 # Build
 build/
 cmake-build-*/
+Testing/
 *.o
 *.a
 *.so
@@ -19,6 +20,9 @@ final_report/
 *.csv
 *.png
 *.pdf
+
+# Keep committed plot assets
+!docs/images/*.png
 
 # Python
 __pycache__/

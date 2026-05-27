@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ \
+            libyaml-cpp-dev \
+            libeigen3-dev \
+            libgtest-dev
+
+      - name: Build GoogleTest
+        # Ubuntu 22.04 ships gtest as source; build and install before configuring the project.
+        run: |
+          cd /usr/src/googletest
+          sudo cmake -B _build -DCMAKE_BUILD_TYPE=Release -DBUILD_GMOCK=OFF
+          sudo cmake --build _build -j$(nproc)
+          sudo cmake --install _build
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        # Run from repo root so config/ relative paths resolve correctly (WORKING_DIRECTORY is set in CMakeLists).
+        run: cmake --build build --target run_tests
