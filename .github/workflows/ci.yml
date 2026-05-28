@@ -20,7 +20,8 @@ jobs:
             cmake g++ \
             libyaml-cpp-dev \
             libeigen3-dev \
-            libgtest-dev
+            libgtest-dev \
+            python3
 
       - name: Build GoogleTest
         # Ubuntu 22.04 ships gtest as source; build and install before configuring the project.
@@ -39,3 +40,14 @@ jobs:
       - name: Test
         # Run from repo root so config/ relative paths resolve correctly (WORKING_DIRECTORY is set in CMakeLists).
         run: cmake --build build --target run_tests
+
+      - name: Regression guard (MPC saves ≥30% pump energy, 0 violations)
+        # Run default scenario under PID then MPC; assert headline metrics are intact.
+        # Both controllers write to results/run_summary.json; rename between runs.
+        run: |
+          mkdir -p results
+          ./build/btm config/default.yaml pid
+          cp results/run_summary.json results/run_pid_summary.json
+          ./build/btm config/default.yaml mpc
+          cp results/run_summary.json results/run_mpc_summary.json
+          python3 scripts/check_regression.py

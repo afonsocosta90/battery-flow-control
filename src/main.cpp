@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
                 sensor
             );
 
-            simulator.run();
+            simulator.run();   // summary printed + JSON written
 
         } else if (controller_type == "mpc") {
             btm::solver::GradientDescentSolver solver(

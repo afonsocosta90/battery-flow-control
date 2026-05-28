@@ -2,8 +2,12 @@
 
 #include "btm/sim/csv_logger.hpp"
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <string>
 
 namespace btm::sim {
 
@@ -30,7 +34,7 @@ Simulator<Controller>::Simulator(model::ThermalModel& model,
       sensor_(std::move(sensor)) {}
 
 template <typename Controller>
-void Simulator<Controller>::run() {
+SimResult Simulator<Controller>::run() {
     // Ensure the output directory exists
     if (const auto parent = std::filesystem::path(log_path_).parent_path(); !parent.empty())
         std::filesystem::create_directories(parent);
@@ -44,13 +48,11 @@ void Simulator<Controller>::run() {
     CsvLogger logger(log_path_);
 
     core::Duration t{0.0};
-    int step = 0;
 
-    // Summary accumulators
-    double peak_T_max = 0.0;
-    double peak_dT    = 0.0;
-    double pump_integral = 0.0;     // ∫ṁ² dt
-    int violations = 0;
+    SimResult result;
+
+    // Running accumulators for time-average
+    double sum_T_max = 0.0;
 
     while (t.value < duration_.value) {
         const auto I_cell  = current_fn_(t);
@@ -64,34 +66,72 @@ void Simulator<Controller>::run() {
         // True physical state for constraint checking and metrics
         const double T_max = state.max_cell_temp().value;
         const double dT    = state.delta_t().value;
-        if (T_max > T_max_constraint_ || dT > dT_max_constraint_) ++violations;
 
-        peak_T_max    = std::max(peak_T_max, T_max);
-        peak_dT       = std::max(peak_dT, dT);
-        pump_integral += mdot.value * mdot.value * dt_.value;
+        const bool T_viol  = T_max > T_max_constraint_;
+        const bool dT_viol = dT   > dT_max_constraint_;
+        if (T_viol || dT_viol) {
+            ++result.violation_count;
+            result.violation_time_s += dt_.value;
+            if (T_viol)
+                result.violation_T_integral_c_s += (T_max - T_max_constraint_) * dt_.value;
+        }
 
-        // Observed temperature for logging (may differ from true max when
-        // sensor mode is not "perfect").
+        result.peak_T_max_c = std::max(result.peak_T_max_c, T_max);
+        result.peak_dT_c    = std::max(result.peak_dT_c, dT);
+        result.pump_integral += mdot.value * mdot.value * dt_.value;
+        sum_T_max += T_max;
+
+        // Observed temperature for logging
         const double T_max_observed = sensor_.observed_max(state).value;
-
         logger.log(t.value, state, mdot, I_cell, T_inlet, T_max_observed);
 
         t.value += dt_.value;
-        ++step;
+        ++result.steps;
 
-        if (step % 1000 == 0) {
+        if (result.steps % 1000 == 0) {
             std::cout << "t=" << t.value << "s  T_max=" << T_max
                       << "°C  mdot=" << mdot.value << "kg/s\n";
         }
     }
 
     logger.flush();
+    result.time_avg_T_max_c = (result.steps > 0) ? sum_T_max / result.steps : 0.0;
 
-    std::cout << "=== Simulation complete: " << step << " steps ===\n"
-              << "  Peak T_cell : " << peak_T_max << " °C\n"
-              << "  Peak ΔT     : " << peak_dT    << " °C\n"
-              << "  ∫ṁ² dt      : " << pump_integral << " (kg/s)²·s\n"
-              << "  Violations  : " << violations << "\n";
+    // Print human-readable summary
+    std::cout << std::fixed << std::setprecision(3)
+              << "=== Simulation complete: " << result.steps << " steps ===\n"
+              << "  Peak T_cell      : " << result.peak_T_max_c      << " °C\n"
+              << "  Time-avg T_max   : " << result.time_avg_T_max_c  << " °C\n"
+              << "  Peak ΔT          : " << result.peak_dT_c         << " °C\n"
+              << "  ∫ṁ² dt           : " << result.pump_integral     << " (kg/s)²·s\n"
+              << "  Violations       : " << result.violation_count   << " steps"
+              << " (" << result.violation_time_s << " s)\n"
+              << "  ∫(T-T_max)⁺ dt   : " << result.violation_T_integral_c_s << " °C·s\n";
+
+    // Write machine-readable JSON summary
+    const std::string json_path = [&] {
+        std::string p = log_path_;
+        const auto pos = p.rfind(".csv");
+        if (pos != std::string::npos) p.replace(pos, 4, "_summary.json");
+        else p += "_summary.json";
+        return p;
+    }();
+
+    {
+        std::ofstream js(json_path);
+        js << std::fixed << std::setprecision(6) << "{\n"
+           << "  \"steps\": "                       << result.steps                    << ",\n"
+           << "  \"peak_T_max_c\": "                << result.peak_T_max_c             << ",\n"
+           << "  \"time_avg_T_max_c\": "            << result.time_avg_T_max_c         << ",\n"
+           << "  \"peak_dT_c\": "                   << result.peak_dT_c               << ",\n"
+           << "  \"violation_count\": "             << result.violation_count          << ",\n"
+           << "  \"violation_time_s\": "            << result.violation_time_s         << ",\n"
+           << "  \"violation_T_integral_c_s\": "   << result.violation_T_integral_c_s << ",\n"
+           << "  \"pump_integral\": "               << result.pump_integral            << "\n"
+           << "}\n";
+    }
+
+    return result;
 }
 
 } // namespace btm::sim
