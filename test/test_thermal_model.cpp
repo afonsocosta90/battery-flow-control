@@ -482,14 +482,17 @@ TEST(ThermalModel, TwoNode_HigherFlowLowerBothTemps) {
 // T7.2 Zero heat load: an initial core-to-can gradient must decay to
 // near-zero when there is no heat generation.
 //
-// Physical rationale: the fast eigenmode (τ_fast ≈ 2.4 s) drives T_core
-// toward T_can via R_core_can. After 20 s (200 steps at dt = 0.1 s) the
-// analytical residual is ≈ 0.5 × exp(−20 / 2.4) ≈ 1.4 × 10⁻⁴ °C.
+// Eigenvalue analysis for two-node system (I = 0):
+//   τ_slow ≈ 96 s  (joint cooling of both nodes toward T_inlet)
+//   τ_fast ≈  2.5 s (gradient relaxation via R_core_can)
 //
-// Note: starting from a uniform warm temperature (T_core = T_can > T_inlet)
-// does NOT give zero gradient at SS — the can cools faster than the core
-// through convection (C_can << C_core), so an initial offset GROWS before
-// decaying.  The test therefore starts from a small explicit offset.
+// Starting from T_core = 25.5 °C, T_can = 25.0 °C, T_inlet = 25.0 °C,
+// the gradient decomposes onto BOTH modes.  Analytically:
+//   X(t) ≈ 0.2286 × exp(−t / 96.2) + 0.2713 × exp(−t / 2.51)
+//
+// At t = 200 s (2000 steps):
+//   slow-mode residual ≈ 0.2286 × exp(−2.08) ≈ 0.029 °C
+//   fast-mode residual ≈ negligible → total X ≈ 0.029 °C < 0.05 °C
 // ============================================================================
 TEST(ThermalModel, TwoNode_ZeroLoadNoGradient) {
     ThermalModel model(make_two_node_config());
@@ -507,14 +510,14 @@ TEST(ThermalModel, TwoNode_ZeroLoadNoGradient) {
     const Temperature  T_inlet{25.0};
     const Duration     dt{0.1};
 
-    // 200 steps = 20 s ≈ 8.3 × τ_fast → gradient decays to ≈ 1.4e-4 °C
-    for (int i = 0; i < 200; ++i)
+    // 2000 steps = 200 s ≈ 2.1 × τ_slow → slow-mode residual ≈ 0.029 °C < 0.05 °C
+    for (int i = 0; i < 2000; ++i)
         state = model.step(state, mdot, I_cell, T_inlet, dt);
 
     const double dT_core_can = state.core_to_can_delta_t().value;
     EXPECT_LT(dT_core_can, 0.05)
         << "Two-node: core-to-can gradient must decay near-zero at zero load "
-        << "(τ_fast ≈ 2.4 s; got " << dT_core_can << " °C after 20 s)";
+        << "(analytical residual ≈ 0.029 °C at 200 s; got " << dT_core_can << " °C)";
 
     // Both nodes must also be close to inlet temperature
     EXPECT_NEAR(state.max_core_temp().value, T_inlet.value, 0.5)
