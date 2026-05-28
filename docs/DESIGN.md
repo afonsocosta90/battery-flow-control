@@ -340,12 +340,14 @@ All metrics are computed over the true physical state, independent of sensor mod
 
 | Metric | Symbol | Definition |
 |---|---|---|
-| Peak cell temperature | T_max_peak | max over all steps of max_i(T_cell[i]) |
-| Time-averaged max temperature | T_max_avg | (1/N) Σ max_i(T_cell[i]) |
-| Peak inter-cell ΔT | ΔT_peak | max over all steps of (max_i – min_i)(T_cell[i]) |
-| **Violation count** | N_viol | Number of timesteps where T_max > T_max_constraint OR ΔT > ΔT_constraint |
+| Peak core temperature | T_core_peak | max over all steps of max_i(T_core[i]) — safety-critical internal maximum |
+| Time-averaged max core temperature | T_core_avg | (1/N) Σ max_i(T_core[i]) |
+| Peak inter-cell ΔT | ΔT_peak | max over all steps of (max_i – min_i)(T_can[i]) — observable surface spread |
+| **Core violation count** | N_viol_core | Number of timesteps where T_core_max > max_core_temperature_c |
+| **Can violation count** | N_viol_can | Number of timesteps where T_can_max > max_can_temperature_c |
+| **Combined violation count** | N_viol | Timesteps where any constraint (core or ΔT) is exceeded |
 | **Violation time** | t_viol | N_viol × dt [seconds] |
-| **Violation temperature integral** | ∫(T-T_lim)⁺ dt | Σ max(0, T_max – T_max_constraint) × dt [°C·s] |
+| **Violation temperature integral** | ∫(T-T_lim)⁺ dt | Σ max(0, T_core_max – T_core_constraint) × dt [°C·s] |
 | **Pump control effort** | ∫ṁ² dt | Σ ṁ² × dt [(kg/s)²·s] — proportional to pump energy for centrifugal pump |
 
 **Regression guarantees (enforced by CI):**
@@ -483,6 +485,10 @@ cell:                              # Molicel INR-21700-P45B (datasheet + L-M fit
   specific_heat_j_per_kg_k: 900    # typical Li-ion cylindrical
   surface_area_m2: 0.00475         # 2πrh + 2πr²
   eta_ir_1c_v: 0.077837            # from Levenberg-Marquardt cell model fit
+  model: single_node               # "single_node" (default) | "two_node" (DESIGN.md §3.1.3)
+  # Two-node parameters (only read when model: two_node):
+  # r_core_can_k_per_w: 0.8       # core→can resistance; ΔT_core_can ≈ 7 °C at 5C
+  # c_can_fraction: 0.10           # fraction of C_th in can shell
 
 module:
   series_count: 24
@@ -496,13 +502,16 @@ coolant:                           # Shell E5 TM 410
   inlet_temperature_c: 25
 
 convection:
+  model: power_law                 # "power_law" (default) | "nusselt_correlation" (§3.1.4)
   h_ref_w_per_m2_k: 250            # at reference flow rate
   m_dot_ref_kg_per_s: 0.5
   scaling_exponent: 0.6            # h ~ (ṁ/ṁ_ref)^0.6
 
 thermal_constraints:
-  max_cell_temperature_c: 35.0
+  max_cell_temperature_c: 35.0    # backward-compat primary limit (also default for core/can)
   max_temperature_delta_c: 5.0
+  # max_core_temperature_c: 35.0  # T6: internal core limit (defaults to max_cell_temperature_c)
+  # max_can_temperature_c: 35.0   # T6: surface limit (defaults to max_cell_temperature_c)
 
 pump:
   min_flow_kg_per_s: 0.01
@@ -517,6 +526,10 @@ scenario:
   type: constant_c_rate            # | step_transient | rising_ambient
   c_rate: 5.0
 
+sensor:
+  mode: perfect                    # "perfect" (default) | "downstream" | "sparse" (T1)
+  # positions: [7, 15, 23]         # sparse mode only
+
 controller:
   type: mpc                        # | pid
   pid:
@@ -524,8 +537,13 @@ controller:
     ki: 0.001
     setpoint_c: 30.0
     integrator_limit: 50.0
+    deadband_c: 0.0                # |error| < deadband_c treated as zero (T4); 0.0 = disabled
   mpc:
-    horizon_steps: 20
+    horizon_steps: 20              # DESIGN.md §3.4: N=20 (2s preview) is the principled choice
+    setpoint_c: 34.9
+    soft_T_max_penalty: 10000.0   # quadratic penalty (J/°C²) for core constraint violation
+    soft_T_can_penalty: 0.0       # T6: can-surface penalty (0.0 = disabled in single-node mode)
+    soft_dT_penalty: 10000.0
     weights:
       tracking: 1.0
       delta_t: 10.0
@@ -560,7 +578,7 @@ Tests are organised by module and by level.
 - `test_thermal_model` verifies energy conservation (total heat in over a step equals stored thermal energy change plus heat removed by coolant, within numerical tolerance), checks the steady-state solution against analytical predictions for simple cases (zero heat generation → all temperatures decay to inlet), and verifies that increasing flow reduces steady-state cell temperatures monotonically. **T7 enhanced validation suite** adds seven additional physics tests for the two-node model and convection alternatives:
   - *TwoNode_CoreHotterThanCan*: after warm-up at 5C, T_core > T_can at all 24 positions.
   - *SingleNode_CoreEqualsCan*: in single-node mode, max_core_temp() == max_cell_temp() at every step (backward-compat invariant).
-  - *TwoNode_SteadyStateGradientAt5C*: steady-state ΔT_core_can ∈ [4, 10] °C; analytical prediction ≈ Q × R = 8.76 × 0.8 ≈ 7 °C.
+  - *TwoNode_SteadyStateGradientAt5C*: after 300 s (≈ 3.1 × τ_slow), ΔT_core_can ∈ [5, 9] °C; analytical prediction Q × R = 8.76 × 0.8 ≈ 7 °C.
   - *TwoNode_EnergyConservation*: Q_gen = ΔE_core + ΔE_can + Q_removed, within 5 J/step.
   - *TwoNode_HigherFlowLowerBothTemps*: increasing ṁ from 0.1 to 1.0 kg/s strictly decreases both T_can and T_core at steady state.
   - *TwoNode_ZeroLoadNoGradient*: at zero current, T_core → T_can → T_inlet (no gradient).

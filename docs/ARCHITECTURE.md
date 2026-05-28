@@ -39,11 +39,13 @@ Coolant flows serially along the 24 positions — it enters at position 1 (coole
 
 ### 2.2 State
 
-The simulation state at each timestep is 24 cell temperatures and 24 coolant temperatures — one per series position:
+The simulation state at each timestep is 24 can (surface) temperatures, 24 core temperatures, and 24 coolant temperatures — one per series position:
 
 ```
-ThermalState = { T_cell[0..23],  T_coolant[0..23] }   (all in °C)
+ThermalState = { T_can[0..23],  T_core[0..23],  T_coolant[0..23] }   (all in °C)
 ```
+
+`T_can` (stored as `cell_temperatures`) is the externally observable surface temperature. `T_core` is the internal jellyroll temperature — the safety-critical maximum. In single-node mode (default), `T_core == T_can` at every position, so all prior results and CI thresholds are unchanged. See §2.4 for the two-node dynamics.
 
 ### 2.3 Heat Generation
 
@@ -62,22 +64,37 @@ Total module: `24 · 13 · 8.76 ≈ 2.73 kW`
 
 ### 2.4 Cell Thermal Dynamics
 
-Each series position i obeys a lumped energy balance (explicit Euler integration):
+Two selectable models, chosen via `cell.model` in YAML.
+
+**Single-node (default — `cell.model: single_node`)**
+
+Each series position i obeys a lumped energy balance (explicit Euler):
 
 ```
 C_th · dT_cell,i/dt = Q_cell - h(ṁ) · A · (T_cell,i - T_coolant,i)
 ```
 
-**Integrated one step (dt = 0.1 s):**
+Integrated one step (dt = 0.1 s):
 
 ```
-T_cell,i(t+dt) = T_cell,i(t) + [Q_cell - h(ṁ)·A·(T_cell,i(t) - T_coolant,i(t))] · dt / C_th
+T_cell,i(t+dt) = T_cell,i(t) + [Q_cell - h(ṁ)·A·(T_cell,i - T_coolant,i)] · dt / C_th
 ```
 
 Parameters:
-- `C_th = m_cell · cp_cell = 0.070 kg · 900 J/(kg·K) = 63 J/K`  (per cell)
+- `C_th = m_cell · cp_cell = 0.070 kg · 900 J/(kg·K) = 63 J/K`
 - `A = 0.00475 m²`  (cell surface area, 2πrh + 2πr²)
 - `h(ṁ)` = convective coefficient, see §2.6
+
+**Two-node (`cell.model: two_node`)**
+
+Adds a separate jellyroll core node coupled to the can (surface) node through an internal resistance R_core_can. Heat is generated only in the core:
+
+```
+C_core · dT_core,i/dt =  Q_cell − (T_core,i − T_can,i) / R_core_can
+C_can  · dT_can,i/dt  = (T_core,i − T_can,i) / R_core_can − h·A·(T_can,i − T_coolant,i)
+```
+
+where `C_core = (1 − f)·C_th`, `C_can = f·C_th`, `f = 0.10` (10 % of mass in the thin Al can wall). At 5C steady state, the analytical gradient is `Q × R = 8.76 × 0.8 ≈ 7 °C`. The coolant chain couples to the can temperature (the physical contact surface). Safety constraints and MPC cost function enforce on `T_core` (the internal maximum). Default YAML parameters: `r_core_can_k_per_w: 0.8`, `c_can_fraction: 0.10`.
 
 ### 2.5 Algebraic Coolant Chain
 
@@ -103,16 +120,29 @@ This equation is implicit because the right-hand side uses `T_cell,i` which has 
 
 ### 2.6 Convective Coefficient
 
-Power-law fit calibrated so the model peaks at ~30 °C during the nominal 5C scenario:
+Two selectable models, chosen via `convection.model` in YAML.
+
+**Power-law (default — `convection.model: power_law`)**
 
 ```
 h(ṁ) = h_ref · (ṁ / ṁ_ref)^n
 ```
 
 - `h_ref = 250 W/(m²·K)` at reference flow `ṁ_ref = 0.5 kg/s`
-- Scaling exponent `n = 0.6` (standard forced-convection over cylinder)
+- Scaling exponent `n = 0.6` (standard forced-convection scaling)
 
-All three parameters live in `config/` — not in source code.
+**Nusselt correlation (`convection.model: nusselt_correlation`)**
+
+Derived from first principles using Shell E5 TM 410 fluid properties:
+
+```
+Re  = ṁ · D_h / (A_flow · μ)    [Re ≈ 600 at ṁ = 0.5 kg/s → laminar]
+Pr  = μ · cp / k                 [Pr ≈ 338 for this dielectric oil]
+Nu  = c · Re^m · Pr^n           [Sieder-Tate laminar: c=0.197, m=n=0.333]
+h   = Nu · k / D_h               [≈ 250 W/(m²·K) at the calibration point]
+```
+
+Both models produce identical h at the reference point (250 W/(m²·K) at 0.5 kg/s) and are monotonically increasing with ṁ — both invariants are enforced in the test suite. All parameters live in `config/` — not in source code.
 
 ### 2.7 Physical Parameters (Shell E5 TM 410 + Molicel INR-21700-P45B)
 
@@ -153,15 +183,25 @@ Controller type is selected once at startup in `main.cpp`. The simulation loop h
 
 ### 3.2 PID Baseline
 
-Proportional-integral control on the maximum cell temperature `T_max(t)`:
+Proportional-integral control on the **observed** maximum temperature from a configurable `SensorModel`:
 
 ```
-e(t) = T_max(t) − T_setpoint
-u(t) = kp · e(t) + ki · ∫e(τ)dτ
-ṁ(t) = clamp(u(t), ṁ_min, ṁ_max)
+T_obs(t) = sensor.observed_max(state)     ← Perfect / Downstream / Sparse mode
+e(t)     = T_obs(t) − T_setpoint
 ```
 
-Anti-windup: the integrator is clamped to `[-integrator_limit, +integrator_limit]` when the output saturates.
+**Back-calculation anti-windup (T4):** when the output saturates, the integrator is back-calculated to exactly the value that would produce the saturated output, preventing overshoot on load drop:
+
+```
+u_raw = kp · e_eff + ki · integrator
+u_sat = clamp(u_raw, ṁ_min, ṁ_max)
+if saturated: integrator = (u_sat − kp · e_eff) / ki   ← exact back-calc
+else:         integrator += e_eff · dt
+```
+
+**Deadband (T4):** `|e| < deadband_c` → `e_eff = 0` (no output change, no integrator accumulation). Default `0.0` = disabled.
+
+**Sensor modes (T1):** `perfect` (true global max, default), `downstream` (cell[23], the physically hottest position), `sparse` (max of named positions). All controllers still receive the full `ThermalState`; the SensorModel extracts what a real sensor would measure.
 
 Configured with `setpoint_c: 32.0` (deliberately conservative, over-cools ~3 °C below the constraint — this is why PID uses 3× more pump energy at steady state compared to MPC).
 
@@ -297,7 +337,7 @@ sequenceDiagram
     end
 ```
 
-The constraint check (`T_max > T_max_constraint || ΔT > dT_max_constraint`) uses values loaded from `thermal_constraints` in the YAML — no hardcoded limits anywhere in C++ source.
+The constraint check uses `max_core_temp()` against `max_core_temperature_c` (which defaults to `max_cell_temperature_c` in single-node mode) — no hardcoded limits anywhere in C++ source. Violation tracking is split: `violation_core_count` and `violation_can_count` are reported separately in the JSON summary alongside the combined `violation_count`.
 
 ---
 
@@ -341,12 +381,13 @@ ctest -R ThermalModel               # single suite
 
 | Suite | Tests | Non-negotiable invariant |
 |-------|-------|--------------------------|
-| `ThermalModel` | 4 | **Energy conservation** on 100 random trajectories (< 5 J imbalance per step). If this fails after a model change, the model is wrong. |
-| `PidController` | 6 | Saturation, zero-error → min flow, reset, integrator |
+| `ThermalModel` | 15 | **Energy conservation** on 100 random trajectories (< 5 J imbalance per step). Also: two-node model correctness (T2), Nusselt convection (T5), physics validation (T7). If EnergyConservation fails after a model change, the model is wrong. |
+| `SensorModel` | 10 | Perfect / Downstream / Sparse observation modes; observed max ≤ true global max (T1) |
+| `PidController` | 10 | Back-calculation anti-windup (T4); deadband; downstream-sensor error; saturation; reset |
 | `MpcSolver` | 5 | **Convergence to known optimum** on synthetic quadratic. If this fails after a solver change, the solver is broken. |
-| `Integration` | 3 | Full PID + MPC short runs, output file exists |
-| `ConfigValidation` | 6 | Missing keys, out-of-range, cross-field checks |
-| `MpcSolver` | 1 | Warm-start reduces iterations |
+| `Integration` | 4 | Full PID + MPC end-to-end runs; downstream-sensor PID; output CSV produced |
+| `ConfigValidation` | 3 | Missing keys, out-of-range, cross-field checks |
+| `CoreTypes` | 4 | Strong-type arithmetic, compile-time unit safety |
 
 ---
 

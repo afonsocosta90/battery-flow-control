@@ -3,7 +3,7 @@
 [![CI](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml/badge.svg)](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](CMakeLists.txt)
-[![Tests](https://img.shields.io/badge/tests-25%20passing-brightgreen.svg)](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen.svg)](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml)
 
 **Predictive thermal control for an immersion-cooled 24s13p lithium-ion battery module.**
 
@@ -142,7 +142,7 @@ All physical parameters, controller tuning, and scenario definitions live in `co
 
 ---
 
-## Tests — 25 Passing
+## Tests — 51 Passing
 
 [![CI — latest run](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml/badge.svg)](https://github.com/afonsocosta90/battery-flow-control/actions/workflows/ci.yml)
 
@@ -155,12 +155,14 @@ cd build && ctest --output-on-failure
 
 | Suite | Tests | What it verifies |
 |:------|:-----:|:-----------------|
-| `ThermalModel` | 4 | Energy conservation (non-negotiable invariant), monotone coolant chain, physical bounds, higher flow → lower temperature |
-| `PidController` | 6 | Zero-error → minimum flow, integrator saturation, reset, anti-windup |
-| `MpcSolver` | 5 | Convergence to known interior optimum, box-constraint projection, warm-start reuse, scalar and vector cost cases |
-| `Integration` | 3 | Full PID + MPC end-to-end runs produce output CSV without exceptions |
-| `ConfigValidation` | 6 | YAML loading, missing keys, out-of-range values, cross-field invariants |
-| **Total** | **25** | |
+| `ThermalModel` | 15 | Energy conservation (non-negotiable invariant); monotone coolant chain; higher flow → lower temperature; two-node core/can model (T2); Nusselt-correlation convection (T5); physics validation — gradient direction, decay, step-response lead (T7) |
+| `SensorModel` | 10 | Perfect / Downstream / Sparse observation modes; observed max matches true max in perfect mode; downstream always returns position 23; sparse never exceeds global max (T1) |
+| `PidController` | 10 | Zero-error → minimum flow; integrator saturation; reset; back-calculation anti-windup prevents windup at ṁ_max; deadband suppresses sub-threshold errors; downstream-sensor error tracks cell[23] (T4) |
+| `MpcSolver` | 5 | Convergence to known interior optimum; box-constraint projection; warm-start sequence reuse; scalar and vector cost cases |
+| `Integration` | 4 | Full PID + MPC end-to-end runs; downstream-sensor PID run; output CSV produced for both controllers |
+| `ConfigValidation` | 3 | YAML loading; missing/invalid keys; out-of-range values |
+| `CoreTypes` | 4 | Strong-type arithmetic; compile-time unit-safety static assertions |
+| **Total** | **51** | |
 
 **Non-negotiable invariants:** `ThermalModel.EnergyConservation` and
 `MpcSolver.ConvergesToInteriorMinimum` must never be skipped or weakened. If either fails after
@@ -179,7 +181,7 @@ mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 cmake --build . -j
 
-# Run tests (25 tests, ~0.2 s)
+# Run tests (51 tests, ~0.4 s)
 ctest --output-on-failure
 
 # Run all six scenario × controller combinations
