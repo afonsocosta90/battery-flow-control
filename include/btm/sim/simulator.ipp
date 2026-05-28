@@ -107,7 +107,7 @@ SimResult Simulator<Controller>::run() {
         ++result.steps;
 
         if (result.steps % 1000 == 0) {
-            std::cout << "t=" << t.value << "s  T_max=" << T_max
+            std::cout << "t=" << t.value << "s  T_core=" << T_core_max
                       << "°C  mdot=" << mdot.value << "kg/s\n";
         }
     }
