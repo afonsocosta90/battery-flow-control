@@ -10,6 +10,7 @@ Testing/
 # IDE / editor
 .idea/
 .vscode/
+.cache/
 *.swp
 *.swo
 *~

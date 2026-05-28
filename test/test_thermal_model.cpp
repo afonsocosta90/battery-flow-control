@@ -200,3 +200,84 @@ TEST(ThermalModel, HigherFlowLowerSteadyStateTemp) {
     EXPECT_GT(T_low_flow, T_high_flow)
         << "Higher flow should give lower steady-state cell temperature";
 }
+
+// ============================================================================
+// T5 — Convection model tests
+// ============================================================================
+
+namespace {
+
+/// Build a config with Nusselt-correlation convection.
+/// Parameters are calibrated to give h ≈ 250 W/(m²·K) at ṁ_ref = 0.5 kg/s.
+Config make_nusselt_config() {
+    auto cfg = make_minimal_config();
+    cfg.convection.model         = "nusselt_correlation";
+    cfg.convection.d_hydraulic_m = 0.006;
+    cfg.convection.flow_area_m2  = 0.0004;
+    cfg.convection.nusselt_c     = 0.197;
+    cfg.convection.nusselt_m     = 0.333;
+    cfg.convection.nusselt_n     = 0.333;
+    return cfg;
+}
+
+} // anonymous namespace
+
+// h must increase strictly with mass-flow rate for the power-law model.
+TEST(ThermalModel, PowerLaw_H_IncreasesWithMdot) {
+    ThermalModel model(make_minimal_config());
+
+    const double h1 = model.h_of_mdot(0.1);
+    const double h2 = model.h_of_mdot(0.5);
+    const double h3 = model.h_of_mdot(1.5);
+
+    EXPECT_LT(h1, h2) << "h must increase from 0.1 to 0.5 kg/s";
+    EXPECT_LT(h2, h3) << "h must increase from 0.5 to 1.5 kg/s";
+    EXPECT_DOUBLE_EQ(h2, 250.0) << "h must equal h_ref at m_dot_ref";
+}
+
+// h must increase strictly with mass-flow rate for the Nusselt-correlation model.
+TEST(ThermalModel, Nusselt_H_IncreasesWithMdot) {
+    ThermalModel model(make_nusselt_config());
+
+    const double h1 = model.h_of_mdot(0.1);
+    const double h2 = model.h_of_mdot(0.5);
+    const double h3 = model.h_of_mdot(1.5);
+
+    EXPECT_LT(h1, h2) << "h must increase from 0.1 to 0.5 kg/s (Nusselt)";
+    EXPECT_LT(h2, h3) << "h must increase from 0.5 to 1.5 kg/s (Nusselt)";
+}
+
+// At the reference point both models should agree to within 1%.
+// The Nusselt parameters above are calibrated specifically for this.
+TEST(ThermalModel, Nusselt_H_AgreesWith_PowerLaw_At_Reference) {
+    ThermalModel pl_model(make_minimal_config());
+    ThermalModel nu_model(make_nusselt_config());
+
+    const double h_ref_mdot = 0.5;   // kg/s — the reference flow rate
+    const double h_pl       = pl_model.h_of_mdot(h_ref_mdot);
+    const double h_nu       = nu_model.h_of_mdot(h_ref_mdot);
+
+    EXPECT_NEAR(h_pl, h_nu, h_pl * 0.01)
+        << "Nusselt and power-law must agree within 1% at the reference flow rate";
+}
+
+// Nusselt model: higher flow → lower steady-state temperature (same as power-law).
+TEST(ThermalModel, Nusselt_HigherFlowLowerSteadyStateTemp) {
+    ThermalModel model(make_nusselt_config());
+
+    const Current     I_cell{4.5 * 5.0};
+    const Temperature T_inlet{25.0};
+    const Duration    dt{0.1};
+
+    auto run_to_ss = [&](double mdot_val) {
+        ThermalState s;
+        for (auto& t : s.cell_temperatures)    t = Temperature{25.0};
+        for (auto& t : s.coolant_temperatures) t = Temperature{25.0};
+        for (int i = 0; i < 600; ++i)
+            s = model.step(s, MassFlowRate{mdot_val}, I_cell, T_inlet, dt);
+        return s.max_cell_temp().value;
+    };
+
+    EXPECT_GT(run_to_ss(0.1), run_to_ss(1.0))
+        << "Higher flow should give lower steady-state temp (Nusselt mode)";
+}

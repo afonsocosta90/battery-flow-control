@@ -111,11 +111,43 @@ T_coolant,i = T_inlet + (1 / (ṁ × c_p,coolant)) × Σ_{j=1..i} h_conv × A_we
 
 This is implicit because T_coolant,i depends on the heat flux which depends on T_coolant,i. The equation is resolved with a fixed three iterations of successive substitution, using the upstream coolant temperature from the previous time step for the first iteration. For dt ≤ 0.1 s and the expected mass-flow and heat-generation ranges, the residual after three iterations is guaranteed < 0.02 °C. This bound is enforced and checked in the thermal model unit tests.
 
-#### 3.1.4 Convective coefficient
+#### 3.1.4 Convective coefficient (two selectable models)
 
-For immersion cooling at moderate Reynolds numbers, h_conv is a function of flow rate. A simple correlation for forced convection over a cylinder (Churchill-Bernstein or Zukauskas) gives Nu = f(Re, Pr) and h = Nu × k_coolant / D_cell. In the first implementation, we treat h_conv as approximately proportional to ṁ^0.6 (standard forced-convection scaling) with a reference value calibrated such that the module thermal performance at nominal flow matches the experimentally-validated 30 °C peak at 5C. This keeps the model tractable and physically reasonable without requiring full CFD-grade correlations.
+The convective coefficient h [W/(m²·K)] depends on mass flow rate ṁ.  Two models are
+implemented and selected via `convection.model` in YAML.
 
-The reference h_conv at nominal flow, and its scaling exponent, live in the configuration file. They are inputs, not magic numbers in the source.
+**Power-law (default, backward-compatible)**
+
+```
+h(ṁ) = h_ref · (ṁ / ṁ_ref)^n
+```
+
+`h_ref = 250 W/(m²·K)` is calibrated to match the experimentally-validated ~30 °C peak at 5C.
+`n = 0.6` is the standard forced-convection scaling exponent.  This model is simple, auditable,
+and reproduces the headline results exactly.
+
+**Nusselt correlation** (`convection.model: nusselt_correlation`)
+
+```
+Re  = ṁ · D_h / (A_flow · μ_coolant)
+Pr  = μ_coolant · cp_coolant / k_coolant
+Nu  = c · Re^m · Pr^n
+h   = Nu · k_coolant / D_h
+```
+
+`D_h` (hydraulic diameter) and `A_flow` (effective total cross-sectional flow area) are new
+geometric YAML parameters.  At the operating conditions for Shell E5 TM 410 dielectric oil
+(ρ = 805 kg/m³, μ = 0.012565 Pa·s, cp = 3500 J/(kg·K), k = 0.13 W/(m·K)):
+
+- **Re ≈ 600** at ṁ = 0.5 kg/s with D_h = 6 mm, A_flow = 400 mm²  → **laminar regime**
+- **Pr ≈ 338** (high-Prandtl viscous oil)
+- Sieder-Tate laminar parameters: c = 0.197 (calibrated), m = 0.333, n = 0.333
+- Result: h(0.5 kg/s) ≈ 250 W/(m²·K), matching the power-law calibration point
+
+The parameters c, m, n are configurable in YAML to allow Dittus-Boelter turbulent (c = 0.023,
+m = 0.8, n = 0.4) or any other peer-reviewed correlation as better experimental data becomes
+available.  Both models produce monotonically increasing h(ṁ); this invariant is enforced in the
+test suite.
 
 ### 3.2 Control strategy
 

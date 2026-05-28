@@ -22,9 +22,18 @@ coolant:                           # Shell E5 TM 410
   inlet_temperature_c: 25.0
 
 convection:
+  model: power_law                  # power_law (default) | nusselt_correlation
   h_ref_w_per_m2_k: 250            # calibrated to 5C nominal scenario peak ~30 °C
   m_dot_ref_kg_per_s: 0.5
   scaling_exponent: 0.6
+  # Nusselt-correlation parameters (only read when model: nusselt_correlation).
+  # Calibrated so Nu-mode gives h ≈ 250 W/(m²·K) at ṁ_ref = 0.5 kg/s.
+  # Flow regime: Re ≈ 600, Pr ≈ 338 (viscous dielectric oil → laminar).
+  # d_hydraulic_m: 0.006     # hydraulic diameter of coolant channel
+  # flow_area_m2: 0.0004     # total effective cross-sectional flow area
+  # nusselt_c: 0.197         # correlation coefficient (calibrated, laminar-regime)
+  # nusselt_m: 0.333         # Re exponent (Sieder-Tate laminar)
+  # nusselt_n: 0.333         # Pr exponent
 
 thermal_constraints:
   max_cell_temperature_c: 35.0

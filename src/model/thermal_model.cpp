@@ -7,15 +7,6 @@
 
 namespace btm::model {
 
-namespace {
-
-inline double h_of_mdot(double mdot, double h_ref, double m_dot_ref, double n) {
-    if (m_dot_ref <= 0.0 || mdot <= 0.0) return h_ref;
-    return h_ref * std::pow(mdot / m_dot_ref, n);
-}
-
-} // anonymous namespace
-
 ThermalModel::ThermalModel(const config::Config& cfg) {
     const auto& cell  = cfg.cell;
     const auto& conv  = cfg.convection;
@@ -23,16 +14,45 @@ ThermalModel::ThermalModel(const config::Config& cfg) {
 
     // Thermal capacitance of ONE CELL (per node = per series position, 13 parallel cells)
     // DESIGN.md §3.1.3: C_th = m_cell * cp_cell (per cell, not per position)
-    // Heat exchange also uses per-cell surface area and h, but position has 13 cells.
-    // We model one effective cell per node (immersion → all parallel cells identical).
     C_th_        = cell.mass_kg * cell.specific_heat_j_per_kg_k;
     A_           = cell.surface_area_m2;
     eta_ir_1c_v_ = cell.eta_ir_1c_v;
     I_1C_        = cell.capacity_ah;   // 1C current = capacity in Ah = A
     coolant_Cp_  = cool.specific_heat_j_per_kg_k;
-    h_ref_       = conv.h_ref_w_per_m2_k;
-    m_dot_ref_   = conv.m_dot_ref_kg_per_s;
-    n_           = conv.scaling_exponent;
+
+    // Convection mode
+    use_nusselt_ = (conv.model == "nusselt_correlation");
+
+    // Power-law parameters (always stored — used as fallback if nusselt disabled)
+    h_ref_     = conv.h_ref_w_per_m2_k;
+    m_dot_ref_ = conv.m_dot_ref_kg_per_s;
+    n_         = conv.scaling_exponent;
+
+    // Nusselt parameters (only meaningful when use_nusselt_ = true)
+    coolant_mu_  = cool.dynamic_viscosity_pa_s;
+    coolant_k_   = cool.thermal_conductivity_w_per_m_k;
+    d_hydraulic_ = conv.d_hydraulic_m;
+    flow_area_   = conv.flow_area_m2;
+    nusselt_c_   = conv.nusselt_c;
+    nusselt_m_   = conv.nusselt_m;
+    nusselt_n_   = conv.nusselt_n;
+}
+
+double ThermalModel::h_of_mdot(double mdot) const {
+    if (use_nusselt_) {
+        // Nusselt correlation: Nu = c * Re^m * Pr^n,  h = Nu * k / D_h
+        //   Re = mdot * D_h / (A_flow * mu)
+        //   Pr = mu * cp / k
+        if (flow_area_ <= 0.0 || coolant_mu_ <= 0.0 || d_hydraulic_ <= 0.0)
+            return h_ref_;   // graceful fallback
+        const double Re = std::max(1.0, mdot * d_hydraulic_ / (flow_area_ * coolant_mu_));
+        const double Pr = coolant_mu_ * coolant_Cp_ / coolant_k_;
+        const double Nu = nusselt_c_ * std::pow(Re, nusselt_m_) * std::pow(Pr, nusselt_n_);
+        return Nu * coolant_k_ / d_hydraulic_;
+    }
+    // Power-law (default, backward-compatible)
+    if (m_dot_ref_ <= 0.0 || mdot <= 0.0) return h_ref_;
+    return h_ref_ * std::pow(mdot / m_dot_ref_, n_);
 }
 
 ThermalState ThermalModel::step(const ThermalState& state,
@@ -45,10 +65,10 @@ ThermalState ThermalModel::step(const ThermalState& state,
 
     // Ohmic heat per cell (W): Q = η_IR,1C · I² / I_1C
     const double Q = eta_ir_1c_v_ * (I_cell.value * I_cell.value / I_1C_);
-    const double h = h_of_mdot(mdot.value, h_ref_, m_dot_ref_, n_);
+    const double h = h_of_mdot(mdot.value);
 
     // -----------------------------------------------------------------------
-    // Phase 1 — explicit Euler for cell temperatures (done exactly ONCE)
+    // Phase 1 — explicit Euler for cell temperatures
     //
     // C_th · dT_i/dt = Q - h·A·(T_i - Tc_i)
     // -----------------------------------------------------------------------
@@ -84,11 +104,10 @@ ThermalState ThermalModel::step(const ThermalState& state,
         Tc[0] = T_inlet.value;
         for (std::size_t i = 1; i < kNumNodes; ++i) {
             if (mdot_Cp > 0.0) {
-                // Solve algebraic equation for Tc[i]
                 Tc[i] = (Tc[i - 1] + hA * T_new[i] / mdot_Cp)
                         / (1.0 + hA / mdot_Cp);
             } else {
-                Tc[i] = Tc[i - 1];   // no flow → no transport
+                Tc[i] = Tc[i - 1];
             }
         }
     }
@@ -105,7 +124,7 @@ std::array<core::Temperature, kNumNodes>
 ThermalModel::coolant_temperatures(const ThermalState& state,
                                    core::MassFlowRate mdot,
                                    core::Temperature T_inlet) const {
-    const double h     = h_of_mdot(mdot.value, h_ref_, m_dot_ref_, n_);
+    const double h     = h_of_mdot(mdot.value);
     const double mdot_Cp = mdot.value * coolant_Cp_;
     const double hA    = h * A_;
 

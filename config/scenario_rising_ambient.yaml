@@ -28,6 +28,7 @@ coolant:
   inlet_temperature_c: 25.0      # starting inlet; the scenario overrides this dynamically
 
 convection:
+  model: power_law
   h_ref_w_per_m2_k: 250
   m_dot_ref_kg_per_s: 0.5
   scaling_exponent: 0.6

@@ -106,6 +106,31 @@ Config load_and_validate(const std::string& path) {
     require_positive(cfg.convection.m_dot_ref_kg_per_s, "convection.m_dot_ref_kg_per_s");
     require_range(cfg.convection.scaling_exponent, 0.1, 2.0, "convection.scaling_exponent");
 
+    // Optional Nusselt-correlation fields (only required when model = nusselt_correlation)
+    cfg.convection.model = conv["model"] ? conv["model"].as<std::string>() : "power_law";
+    if (cfg.convection.model != "power_law" && cfg.convection.model != "nusselt_correlation") {
+        throw std::runtime_error(
+            "convection.model must be 'power_law' or 'nusselt_correlation' (got '"
+            + cfg.convection.model + "')");
+    }
+    if (cfg.convection.model == "nusselt_correlation") {
+        if (!conv["d_hydraulic_m"] || !conv["flow_area_m2"]) {
+            throw std::runtime_error(
+                "convection.d_hydraulic_m and convection.flow_area_m2 are required "
+                "when convection.model = nusselt_correlation");
+        }
+        cfg.convection.d_hydraulic_m = conv["d_hydraulic_m"].as<double>();
+        cfg.convection.flow_area_m2  = conv["flow_area_m2"].as<double>();
+        cfg.convection.nusselt_c     = conv["nusselt_c"] ? conv["nusselt_c"].as<double>() : 0.197;
+        cfg.convection.nusselt_m     = conv["nusselt_m"] ? conv["nusselt_m"].as<double>() : 0.333;
+        cfg.convection.nusselt_n     = conv["nusselt_n"] ? conv["nusselt_n"].as<double>() : 0.333;
+        require_positive(cfg.convection.d_hydraulic_m, "convection.d_hydraulic_m");
+        require_positive(cfg.convection.flow_area_m2, "convection.flow_area_m2");
+        require_positive(cfg.convection.nusselt_c, "convection.nusselt_c");
+        require_range(cfg.convection.nusselt_m, 0.1, 2.0, "convection.nusselt_m");
+        require_range(cfg.convection.nusselt_n, 0.0, 2.0, "convection.nusselt_n");
+    }
+
     // --- thermal_constraints ---
     auto tc = root["thermal_constraints"];
     if (!tc) throw std::runtime_error("Missing top-level key 'thermal_constraints'");

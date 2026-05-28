@@ -34,9 +34,22 @@ struct CoolantParams {
 };
 
 struct ConvectionParams {
+    // ── Power-law mode (default, backward-compatible) ────────────────────────
+    // h(ṁ) = h_ref * (ṁ / ṁ_ref)^scaling_exponent
     double h_ref_w_per_m2_k{0.0};
     double m_dot_ref_kg_per_s{0.0};
     double scaling_exponent{0.0};
+
+    // ── Nusselt-correlation mode (optional, YAML: convection.model: nusselt_correlation) ─
+    // Nu = nusselt_c * Re^nusselt_m * Pr^nusselt_n  →  h = Nu * k_coolant / D_h
+    // Re = ṁ * D_h / (flow_area * μ_coolant)
+    // Pr = μ_coolant * cp_coolant / k_coolant          (all from coolant: section)
+    std::string model{"power_law"};     ///< "power_law" | "nusselt_correlation"
+    double d_hydraulic_m{0.0};          ///< hydraulic diameter of coolant channel (m)
+    double flow_area_m2{0.0};           ///< effective total cross-sectional flow area (m²)
+    double nusselt_c{0.197};            ///< Nu correlation coefficient (default: calibrated laminar)
+    double nusselt_m{0.333};            ///< Re exponent (0.333 laminar, 0.8 turbulent Dittus-Boelter)
+    double nusselt_n{0.333};            ///< Pr exponent (0.333 laminar, 0.4 turbulent)
 };
 
 struct ThermalConstraints {
