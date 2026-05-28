@@ -437,3 +437,102 @@ TEST(ThermalModel, TwoNode_EnergyConservation) {
             << ", Q_removed=" << Q_removed << ")";
     }
 }
+
+// ============================================================================
+// T7 — Enhanced Physics Validation Suite
+// ============================================================================
+
+// ============================================================================
+// T7.1 Monotonicity: increasing ṁ strictly decreases BOTH can AND core
+// steady-state temperatures in two-node mode.
+//
+// Physical rationale: more flow → lower T_coolant → lower T_can (convection ↑)
+// → smaller flux through R_core_can → lower T_core.
+// ============================================================================
+TEST(ThermalModel, TwoNode_HigherFlowLowerBothTemps) {
+    ThermalModel model(make_two_node_config());
+
+    const Current     I_cell{4.5 * 5.0};
+    const Temperature T_inlet{25.0};
+    const Duration    dt{0.1};
+
+    auto run_to_ss = [&](double mdot_val) -> std::pair<double, double> {
+        ThermalState s = make_two_node_state(25.0);
+        for (int i = 0; i < 600; ++i)
+            s = model.step(s, MassFlowRate{mdot_val}, I_cell, T_inlet, dt);
+        return {s.max_cell_temp().value, s.max_core_temp().value};
+    };
+
+    const auto [T_can_lo, T_core_lo] = run_to_ss(0.1);
+    const auto [T_can_hi, T_core_hi] = run_to_ss(1.0);
+
+    EXPECT_GT(T_can_lo,  T_can_hi)
+        << "Two-node: higher flow must lower steady-state can temperature";
+    EXPECT_GT(T_core_lo, T_core_hi)
+        << "Two-node: higher flow must lower steady-state core temperature";
+}
+
+// ============================================================================
+// T7.2 Zero heat load: in two-node mode with no current, T_core → T_can
+// → T_inlet at steady state (no thermal gradient anywhere).
+// ============================================================================
+TEST(ThermalModel, TwoNode_ZeroLoadNoGradient) {
+    ThermalModel model(make_two_node_config());
+
+    ThermalState state = make_two_node_state(35.0);  // warm start
+
+    const MassFlowRate mdot{0.5};
+    const Current      I_cell{0.0};   // no current → no heat generation
+    const Temperature  T_inlet{25.0};
+    const Duration     dt{0.1};
+
+    // Run to approximate steady state (zero heat input → cool to inlet)
+    for (int i = 0; i < 800; ++i)
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+
+    // At zero load, T_core == T_can (both cool to T_coolant ≈ T_inlet)
+    const double dT_core_can = state.core_to_can_delta_t().value;
+    EXPECT_LT(dT_core_can, 0.5)
+        << "Two-node: core-to-can gradient must be < 0.5°C at zero load (got "
+        << dT_core_can << "°C)";
+
+    // All temperatures must approach inlet (within 2°C after 80s)
+    EXPECT_NEAR(state.max_core_temp().value, T_inlet.value, 2.0)
+        << "Two-node: T_core must approach T_inlet at zero load";
+    EXPECT_NEAR(state.max_cell_temp().value, T_inlet.value, 2.0)
+        << "Two-node: T_can must approach T_inlet at zero load";
+}
+
+// ============================================================================
+// T7.3 Step response: after a sudden 1C→5C step, the core temperature leads
+// the can temperature (core heats first, then dissipates through R_core_can).
+// This is the key physical justification for the two-node model: the core
+// reaches constraint temperature before the can sensor registers it.
+// ============================================================================
+TEST(ThermalModel, TwoNode_CoreLeadsCan_OnLoadStep) {
+    ThermalModel model(make_two_node_config());
+
+    const MassFlowRate mdot{0.5};
+    const Temperature  T_inlet{25.0};
+    const Duration     dt{0.1};
+
+    // Start from single-node-equivalent steady state at 1C
+    ThermalState state = make_two_node_state(25.0);
+    for (int i = 0; i < 600; ++i)
+        state = model.step(state, mdot, Current{4.5 * 1.0}, T_inlet, dt);
+
+    // Step to 5C — immediately after step T_core must have risen more than T_can
+    const double T_core_before = state.max_core_temp().value;
+    const double T_can_before  = state.max_cell_temp().value;
+
+    // Take a few steps at 5C
+    for (int i = 0; i < 5; ++i)
+        state = model.step(state, mdot, Current{4.5 * 5.0}, T_inlet, dt);
+
+    const double T_core_rise = state.max_core_temp().value - T_core_before;
+    const double T_can_rise  = state.max_cell_temp().value - T_can_before;
+
+    EXPECT_GT(T_core_rise, T_can_rise)
+        << "Two-node: T_core must rise faster than T_can on a load step "
+        << "(core_rise=" << T_core_rise << " °C, can_rise=" << T_can_rise << " °C)";
+}

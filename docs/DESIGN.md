@@ -557,7 +557,14 @@ Tests are organised by module and by level.
 
 - `test_core_types` checks that strong types prevent unit mistakes at compile time (via static_assert on disallowed conversions) and that arithmetic behaves correctly.
 - `test_config_validation` feeds malformed configs (negative mass, swapped bounds, unknown controller type, missing fields) and asserts that load_and_validate throws with the expected error keyword.
-- `test_thermal_model` verifies energy conservation (total heat in over a step equals stored thermal energy change plus heat removed by coolant, within numerical tolerance), checks the steady-state solution against analytical predictions for simple cases (zero heat generation → all temperatures decay to inlet), and verifies that increasing flow reduces steady-state cell temperatures monotonically.
+- `test_thermal_model` verifies energy conservation (total heat in over a step equals stored thermal energy change plus heat removed by coolant, within numerical tolerance), checks the steady-state solution against analytical predictions for simple cases (zero heat generation → all temperatures decay to inlet), and verifies that increasing flow reduces steady-state cell temperatures monotonically. **T7 enhanced validation suite** adds seven additional physics tests for the two-node model and convection alternatives:
+  - *TwoNode_CoreHotterThanCan*: after warm-up at 5C, T_core > T_can at all 24 positions.
+  - *SingleNode_CoreEqualsCan*: in single-node mode, max_core_temp() == max_cell_temp() at every step (backward-compat invariant).
+  - *TwoNode_SteadyStateGradientAt5C*: steady-state ΔT_core_can ∈ [4, 10] °C; analytical prediction ≈ Q × R = 8.76 × 0.8 ≈ 7 °C.
+  - *TwoNode_EnergyConservation*: Q_gen = ΔE_core + ΔE_can + Q_removed, within 5 J/step.
+  - *TwoNode_HigherFlowLowerBothTemps*: increasing ṁ from 0.1 to 1.0 kg/s strictly decreases both T_can and T_core at steady state.
+  - *TwoNode_ZeroLoadNoGradient*: at zero current, T_core → T_can → T_inlet (no gradient).
+  - *TwoNode_CoreLeadsCan_OnLoadStep*: on a 1C→5C step, T_core rises faster than T_can (physical evidence for the two-node model's relevance).
 - `test_pid_controller` checks setpoint tracking on a first-order plant proxy, integrator bounding, and saturation behaviour at flow limits.
 - `test_mpc_solver` checks convergence on a trivial cost surface (quadratic in u with known minimum), warm-start usage, and respect for input bounds via projection.
 
