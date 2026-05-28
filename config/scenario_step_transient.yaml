@@ -65,7 +65,7 @@ controller:
     integrator_limit: 100.0
     deadband_c: 0.0                # |error| < deadband_c treated as zero (0.0 = disabled)
   mpc:
-    horizon_steps: 20
+    horizon_steps: 20              # DESIGN.md §3.4: N=20 (2s preview) is the principled choice
     setpoint_c: 34.9               # 0.1 °C below hard limit for numerical margin
     soft_T_max_penalty: 10000.0    # quadratic penalty (J/°C²) when T_cell > max_cell_temperature_c
     soft_dT_penalty: 10000.0       # quadratic penalty (J/°C²) when ΔT > max_temperature_delta_c
