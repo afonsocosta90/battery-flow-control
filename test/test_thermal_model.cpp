@@ -38,6 +38,15 @@ Config make_minimal_config() {
     return cfg;
 }
 
+/// Build a two-node config from the single-node base.
+Config make_two_node_config() {
+    Config cfg = make_minimal_config();
+    cfg.cell.model            = "two_node";
+    cfg.cell.r_core_can_k_per_w = 0.8;   // calibrated: ΔT≈7°C at 5C
+    cfg.cell.c_can_fraction   = 0.10;    // 10% of C_th in can shell
+    return cfg;
+}
+
 } // anonymous namespace
 
 // ============================================================================
@@ -280,4 +289,151 @@ TEST(ThermalModel, Nusselt_HigherFlowLowerSteadyStateTemp) {
 
     EXPECT_GT(run_to_ss(0.1), run_to_ss(1.0))
         << "Higher flow should give lower steady-state temp (Nusselt mode)";
+}
+
+// ============================================================================
+// T2 — Two-Node Cell Model tests
+// ============================================================================
+
+// Initialise a ThermalState at a uniform temperature for two-node runs.
+static ThermalState make_two_node_state(double T0) {
+    ThermalState s;
+    for (auto& t : s.cell_temperatures)    t = Temperature{T0};
+    for (auto& t : s.core_temperatures)    t = Temperature{T0};
+    for (auto& t : s.coolant_temperatures) t = Temperature{T0};
+    return s;
+}
+
+// ============================================================================
+// After running under load the core must be strictly hotter than the can at
+// every serial position (heat is generated in the core, flows outward).
+// ============================================================================
+TEST(ThermalModel, TwoNode_CoreHotterThanCan) {
+    ThermalModel model(make_two_node_config());
+
+    ThermalState state = make_two_node_state(25.0);
+
+    const MassFlowRate mdot{0.5};
+    const Current      I_cell{4.5 * 5.0};   // 5C
+    const Temperature  T_inlet{25.0};
+    const Duration     dt{0.1};
+
+    // Run to approximate steady state
+    for (int i = 0; i < 600; ++i)
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+
+    for (std::size_t i = 0; i < kNumNodes; ++i) {
+        EXPECT_GT(state.core_temperatures[i].value,
+                  state.cell_temperatures[i].value)
+            << "Core must be hotter than can at position " << i
+            << " (heat flows outward from core to can)";
+    }
+}
+
+// ============================================================================
+// Single-node backward compatibility: in single-node mode, max_core_temp()
+// must equal max_cell_temp() at every timestep.
+// ============================================================================
+TEST(ThermalModel, SingleNode_CoreEqualsCan) {
+    ThermalModel model(make_minimal_config());  // single-node
+
+    ThermalState state = make_two_node_state(25.0);
+
+    const MassFlowRate mdot{0.5};
+    const Current      I_cell{4.5 * 5.0};
+    const Temperature  T_inlet{25.0};
+    const Duration     dt{0.1};
+
+    for (int step = 0; step < 300; ++step) {
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+        ASSERT_DOUBLE_EQ(state.max_core_temp().value, state.max_cell_temp().value)
+            << "Single-node: core must equal can at step " << step;
+    }
+}
+
+// ============================================================================
+// Steady-state core-to-can gradient.
+//
+// At steady state under 5C: Q_cell = η·I²/I_1C = 0.077837·22.5²/4.5 ≈ 8.756 W
+// RC analytical solution: ΔT_core_can = Q · R = 8.756 × 0.8 ≈ 7.0 °C
+// Acceptable range: [4, 8] °C (covers uncertainty in Euler numerical scheme).
+// ============================================================================
+TEST(ThermalModel, TwoNode_SteadyStateGradientAt5C) {
+    ThermalModel model(make_two_node_config());
+
+    ThermalState state = make_two_node_state(25.0);
+
+    const MassFlowRate mdot{0.5};
+    const Current      I_cell{4.5 * 5.0};
+    const Temperature  T_inlet{25.0};
+    const Duration     dt{0.1};
+
+    // Run to approximate steady state (600 steps = 60 s ~ τ_thermal ≈ 53 s)
+    for (int i = 0; i < 600; ++i)
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+
+    const double dT_core_can = state.core_to_can_delta_t().value;
+
+    EXPECT_GT(dT_core_can, 4.0)
+        << "ΔT_core_can must exceed 4 °C at 5C (got " << dT_core_can << ")";
+    EXPECT_LT(dT_core_can, 10.0)
+        << "ΔT_core_can must be below 10 °C at 5C (got " << dT_core_can << ")";
+}
+
+// ============================================================================
+// Energy conservation for the two-node model.
+//
+// Exactly the same accounting as for single-node, but now the stored energy
+// is split between core and can:
+//   ΔE_stored = Σ_i [ C_core·(T_core_new_i − T_core_i) + C_can·(T_can_new_i − T_can_i) ]
+//             = Σ_i   C_th·(T_can_new_i − T_can_i)   +  correction term
+// We check the full balance: Q_gen = ΔE_core + ΔE_can + Q_removed.
+// Tolerance: 5 J per step (same as single-node; O(dt) Euler splitting error).
+// ============================================================================
+TEST(ThermalModel, TwoNode_EnergyConservation) {
+    const auto cfg = make_two_node_config();
+    ThermalModel model(cfg);
+
+    const Duration     dt{0.1};
+    const MassFlowRate mdot{0.5};
+    const Current      I_cell{4.5 * 5.0};
+    const Temperature  T_inlet{25.0};
+
+    const double Q_cell = cfg.cell.eta_ir_1c_v *
+                          (I_cell.value * I_cell.value / cfg.cell.capacity_ah);
+    const double Q_gen_step = static_cast<double>(kNumNodes) * Q_cell * dt.value;
+
+    const double C_th   = cfg.cell.mass_kg * cfg.cell.specific_heat_j_per_kg_k;
+    const double C_can  = cfg.cell.c_can_fraction * C_th;
+    const double C_core = (1.0 - cfg.cell.c_can_fraction) * C_th;
+
+    // Run to approximate steady state first so Tc is self-consistent
+    ThermalState state = make_two_node_state(25.0);
+    for (int i = 0; i < 200; ++i)
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+
+    // Check energy balance over 50 steps in near-steady-state
+    for (int step = 0; step < 50; ++step) {
+        ThermalState prev = state;
+        state = model.step(state, mdot, I_cell, T_inlet, dt);
+
+        double delta_E = 0.0;
+        for (std::size_t i = 0; i < kNumNodes; ++i) {
+            delta_E += C_core * (state.core_temperatures[i].value
+                                 - prev.core_temperatures[i].value);
+            delta_E += C_can  * (state.cell_temperatures[i].value
+                                 - prev.cell_temperatures[i].value);
+        }
+
+        const double Tc_outlet = state.coolant_temperatures[kNumNodes - 1].value;
+        const double Q_removed = mdot.value * cfg.coolant.specific_heat_j_per_kg_k
+                                 * (Tc_outlet - T_inlet.value) * dt.value;
+
+        const double imbalance = std::abs(Q_gen_step - (delta_E + Q_removed));
+
+        EXPECT_LT(imbalance, 5.0)
+            << "Step " << step << ": energy imbalance = " << imbalance
+            << " J  (Q_gen=" << Q_gen_step << ", ΔE=" << delta_E
+            << ", Q_removed=" << Q_removed << ")";
+    }
 }

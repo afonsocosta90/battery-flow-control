@@ -69,6 +69,21 @@ Config load_and_validate(const std::string& path) {
     require_positive(cfg.cell.surface_area_m2, "cell.surface_area_m2");
     require_positive(cfg.cell.eta_ir_1c_v, "cell.eta_ir_1c_v");
 
+    // Two-node cell model (optional; defaults to single_node for backward compatibility)
+    cfg.cell.model = cell["model"] ? cell["model"].as<std::string>() : "single_node";
+    if (cfg.cell.model != "single_node" && cfg.cell.model != "two_node") {
+        throw std::runtime_error(
+            "cell.model must be 'single_node' or 'two_node' (got '" + cfg.cell.model + "')");
+    }
+    if (cfg.cell.model == "two_node") {
+        cfg.cell.r_core_can_k_per_w = cell["r_core_can_k_per_w"]
+            ? cell["r_core_can_k_per_w"].as<double>() : 0.8;
+        cfg.cell.c_can_fraction = cell["c_can_fraction"]
+            ? cell["c_can_fraction"].as<double>() : 0.10;
+        require_positive(cfg.cell.r_core_can_k_per_w, "cell.r_core_can_k_per_w");
+        require_range(cfg.cell.c_can_fraction, 0.01, 0.99, "cell.c_can_fraction");
+    }
+
     // --- module ---
     auto module = root["module"];
     if (!module) throw std::runtime_error("Missing top-level key 'module'");

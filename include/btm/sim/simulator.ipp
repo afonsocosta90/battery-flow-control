@@ -43,6 +43,7 @@ SimResult Simulator<Controller>::run() {
     model::ThermalState state;
     const core::Temperature T0 = inlet_fn_(core::Duration{0.0});
     for (auto& t : state.cell_temperatures)    t = T0;
+    for (auto& t : state.core_temperatures)    t = T0;
     for (auto& t : state.coolant_temperatures) t = T0;
 
     CsvLogger logger(log_path_);
@@ -63,27 +64,28 @@ SimResult Simulator<Controller>::run() {
 
         state = model_.step(state, mdot, I_cell, T_inlet, dt_);
 
-        // True physical state for constraint checking and metrics
-        const double T_max = state.max_cell_temp().value;
-        const double dT    = state.delta_t().value;
+        // Safety constraints enforce on CORE temperature (T_core ≥ T_can always).
+        // In single-node mode max_core_temp() == max_cell_temp() — backward-compatible.
+        const double T_core_max = state.max_core_temp().value;
+        const double dT         = state.delta_t().value;
 
-        const bool T_viol  = T_max > T_max_constraint_;
-        const bool dT_viol = dT   > dT_max_constraint_;
+        const bool T_viol  = T_core_max > T_max_constraint_;
+        const bool dT_viol = dT         > dT_max_constraint_;
         if (T_viol || dT_viol) {
             ++result.violation_count;
             result.violation_time_s += dt_.value;
             if (T_viol)
-                result.violation_T_integral_c_s += (T_max - T_max_constraint_) * dt_.value;
+                result.violation_T_integral_c_s += (T_core_max - T_max_constraint_) * dt_.value;
         }
 
-        result.peak_T_max_c = std::max(result.peak_T_max_c, T_max);
+        result.peak_T_max_c = std::max(result.peak_T_max_c, T_core_max);
         result.peak_dT_c    = std::max(result.peak_dT_c, dT);
         result.pump_integral += mdot.value * mdot.value * dt_.value;
-        sum_T_max += T_max;
+        sum_T_max += T_core_max;
 
-        // Observed temperature for logging
+        // Observed temperature for logging (sensor sees CAN/surface, not core)
         const double T_max_observed = sensor_.observed_max(state).value;
-        logger.log(t.value, state, mdot, I_cell, T_inlet, T_max_observed);
+        logger.log(t.value, state, mdot, I_cell, T_inlet, T_max_observed, T_core_max);
 
         t.value += dt_.value;
         ++result.steps;
@@ -100,8 +102,8 @@ SimResult Simulator<Controller>::run() {
     // Print human-readable summary
     std::cout << std::fixed << std::setprecision(3)
               << "=== Simulation complete: " << result.steps << " steps ===\n"
-              << "  Peak T_cell      : " << result.peak_T_max_c      << " °C\n"
-              << "  Time-avg T_max   : " << result.time_avg_T_max_c  << " °C\n"
+              << "  Peak T_core      : " << result.peak_T_max_c      << " °C\n"
+              << "  Time-avg T_core  : " << result.time_avg_T_max_c  << " °C\n"
               << "  Peak ΔT          : " << result.peak_dT_c         << " °C\n"
               << "  ∫ṁ² dt           : " << result.pump_integral     << " (kg/s)²·s\n"
               << "  Violations       : " << result.violation_count   << " steps"

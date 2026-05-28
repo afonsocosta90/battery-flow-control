@@ -61,6 +61,17 @@ private:
     double nusselt_m_{0.333};
     double nusselt_n_{0.333};
 
+    // ── Two-node cell model (DESIGN.md §3.1.3) ─────────────────────────────
+    // When use_two_node_ = true, each serial position has separate T_core and
+    // T_can nodes coupled by R_core_can.
+    //   C_core · dT_core/dt = Q - (T_core - T_can) / R_core_can
+    //   C_can  · dT_can/dt  = (T_core - T_can) / R_core_can - h·A·(T_can - T_coolant)
+    // In single-node mode: C_core = C_th_, C_can = 0, R = ∞  (T_core = T_can = T_cell).
+    bool   use_two_node_{false};
+    double R_core_can_{0.0};    ///< thermal resistance core→can (K/W)
+    double C_core_{0.0};        ///< core thermal capacitance (J/K)  = (1−f)·C_th
+    double C_can_{0.0};         ///< can thermal capacitance (J/K)   = f·C_th
+
     // Fixed 3 iterations as specified in DESIGN.md
     static constexpr int kCoolantIterations = 3;
 };

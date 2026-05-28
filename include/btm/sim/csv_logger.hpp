@@ -23,11 +23,14 @@ public:
     /// \param t_max_observed  Observed max temperature as seen by the sensor model
     ///                        (may differ from the true global max when not in
     ///                        perfect-sensor mode).
+    /// \param t_core_max      True maximum CORE temperature (= T_can in single-node mode;
+    ///                        > T_can under load in two-node mode).
     void log(double t, const model::ThermalState& state,
              core::MassFlowRate mdot,
              core::Current I_cell,
              core::Temperature T_inlet,
-             double t_max_observed);
+             double t_max_observed,
+             double t_core_max);
 
     void flush();
 

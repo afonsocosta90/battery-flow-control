@@ -90,6 +90,8 @@ The η_IR,1C value already absorbs internal cell resistance, busbar losses at th
 
 #### 3.1.3 Thermal dynamics
 
+**Single-node model (default)**
+
 For each series position i ∈ {1, …, 24}, the lumped energy balance is:
 
 ```
@@ -110,6 +112,54 @@ T_coolant,i = T_inlet + (1 / (ṁ × c_p,coolant)) × Σ_{j=1..i} h_conv × A_we
 ```
 
 This is implicit because T_coolant,i depends on the heat flux which depends on T_coolant,i. The equation is resolved with a fixed three iterations of successive substitution, using the upstream coolant temperature from the previous time step for the first iteration. For dt ≤ 0.1 s and the expected mass-flow and heat-generation ranges, the residual after three iterations is guaranteed < 0.02 °C. This bound is enforced and checked in the thermal model unit tests.
+
+**Two-node model (optional, YAML: `cell.model: two_node`)**
+
+The single-node model assumes the entire cell cross-section is isothermal.  Under
+high-rate discharge (≥ 3C) the internal temperature gradient between the jellyroll
+core and the aluminium-clad surface is significant — physically around 5–10 °C for
+cylindrical 21700-format cells.  The two-node model resolves this gradient by adding
+a separate **core** capacitance coupled to the **can** (surface) node through an
+internal thermal resistance:
+
+```
+C_core × dT_core,i / dt =  Q_pos,i − (T_core,i − T_can,i) / R_core_can
+C_can  × dT_can,i  / dt = (T_core,i − T_can,i) / R_core_can − h·A·(T_can,i − T_coolant,i)
+```
+
+where:
+
+| Symbol | Default | Meaning |
+|--------|---------|---------|
+| `C_core = (1 − f) × C_th` | f = 0.10 | Core thermal mass (jellyroll, ~90 % of cell mass) |
+| `C_can  =  f × C_th`      | f = 0.10 | Can shell thermal mass (~10 %, thin Al wall) |
+| `R_core_can` | 0.8 K/W | Core-to-can thermal resistance |
+
+**Steady-state gradient (analytical)**  
+At steady state dT/dt = 0 for both nodes:
+```
+T_core − T_can = Q_cell × R_core_can = 8.76 W × 0.8 K/W ≈ 7.0 °C  (at 5C)
+```
+Tested range: 4–10 °C (covers numerical integration error and parameter uncertainty).
+
+**Key design choice:** `ThermalState::cell_temperatures` always holds the **can / surface**
+temperature — the externally observable quantity.  `ThermalState::core_temperatures` holds
+the **core** temperature, which is the safety-critical internal maximum.
+Safety constraints (`T_max < 35 °C`) and the MPC cost function both operate on
+`max_core_temp()`.  In single-node mode `max_core_temp() == max_cell_temp()`, so all
+existing results and CI thresholds are unchanged when `cell.model: single_node`.
+
+The coolant chain still couples to the **can** temperature (the physical contact surface),
+so `coolant_temperatures()` is correct for both models.
+
+**YAML parameters** (all optional — default to single-node if `cell.model` absent):
+```yaml
+cell:
+  model: single_node          # "single_node" | "two_node"
+  # Two-node parameters (only read when model: two_node):
+  # r_core_can_k_per_w: 0.8  # core→can resistance (K/W)
+  # c_can_fraction: 0.10      # fraction of C_th in can shell
+```
 
 #### 3.1.4 Convective coefficient (two selectable models)
 

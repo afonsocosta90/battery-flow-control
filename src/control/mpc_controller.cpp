@@ -88,7 +88,9 @@ double MpcController::evaluate_cost(const model::ThermalState& current_state,
     for (const auto& u : u_seq) {
         s = model_.step(s, u, I_cell, T_inlet, dt);
 
-        const double Tmax       = s.max_cell_temp().value;
+        // Safety constraint tracking uses the CORE temperature (T_core ≥ T_can always).
+        // In single-node mode max_core_temp() == max_cell_temp() — backward-compatible.
+        const double Tmax       = s.max_core_temp().value;
         const double track_err  = Tmax - setpoint_c_;   // tracking target from config
         const double dT         = s.delta_t().value;
         const double slew       = u.value - prev_u.value;
@@ -98,7 +100,7 @@ double MpcController::evaluate_cost(const model::ThermalState& current_state,
         cost += w_pump_    * u.value * u.value;
         cost += w_slew_    * slew * slew;
 
-        // Soft constraint: T_cell < T_max_constraint (from thermal_constraints config)
+        // Soft constraint: T_core < T_max_constraint (from thermal_constraints config)
         if (Tmax > T_max_constraint_) {
             const double excess = Tmax - T_max_constraint_;
             cost += soft_T_max_penalty_ * excess * excess;

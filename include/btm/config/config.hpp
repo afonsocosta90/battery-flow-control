@@ -17,7 +17,23 @@ struct CellParams {
     double mass_kg{0.0};
     double specific_heat_j_per_kg_k{0.0};
     double surface_area_m2{0.0};
-    double eta_ir_1c_v{0.0};           // heat generation coefficient
+    double eta_ir_1c_v{0.0};           ///< heat generation coefficient
+
+    // ── Two-node cell model (DESIGN.md §3.1.3) ─────────────────────────────
+    /// "single_node" (default) — one lumped capacitance per position.
+    /// "two_node"              — separate core and can capacitances connected
+    ///                           by a thermal resistance R_core_can.
+    std::string model{"single_node"};
+
+    /// Thermal resistance between core and can surface (K/W).
+    /// Calibrated to ~0.8 K/W for INR-21700 format:
+    ///   ΔT_core_can ≈ Q × R = 8.76 W × 0.8 K/W ≈ 7 °C at 5C discharge.
+    double r_core_can_k_per_w{0.8};
+
+    /// Fraction of total cell thermal mass (m×cp) allocated to the can shell.
+    /// Remainder (1 − c_can_fraction) goes to the core.
+    /// Default 0.10 (10 %) — consistent with thin-wall Al cylinder geometry.
+    double c_can_fraction{0.10};
 };
 
 struct ModuleGeometry {
