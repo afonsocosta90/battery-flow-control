@@ -238,10 +238,23 @@ J(u) = Σ_{k=0..N-1} [
 
 The terms encode, in order: tracking a desired cell temperature, penalising thermal non-uniformity across the module, penalising pump power (which scales with ṁ²·³ for centrifugal pumps; we use ṁ² as a tractable proxy), and penalising flow-rate slew (avoids chattering and respects pump dynamics).
 
-Constraints:
+**Constraints (T6 — core-temperature-aware):**
 
-- Hard input bounds: ṁ_min ≤ ṁ(k) ≤ ṁ_max for all k. Enforced by projecting each iterate onto the feasible interval after every gradient step.
-- Soft state constraints: T_cell,i < 35 °C and ΔT < 5 °C are enforced through the cost function via large quadratic penalty weights when constraints are predicted to be violated. Soft constraints are appropriate here because hard state constraints with a gradient solver are non-trivial; the large penalty makes violations extremely costly in J, which is practically equivalent for well-tuned weights.
+- **Hard input bounds:** ṁ_min ≤ ṁ(k) ≤ ṁ_max for all k. Enforced by projecting each iterate onto the feasible interval after every gradient step.
+- **Soft core constraint:** T_core,i < T_core_max (default 35 °C). Enforced via quadratic penalty `P_core × max(0, T_core,i − T_core_max)²`. In single-node mode, T_core = T_cell — backward-compatible with all prior results.
+- **Soft can constraint (T6, optional):** T_can,i < T_can_max. Penalty weight `soft_T_can_penalty` defaults to 0 (disabled). Enables a secondary surface-temperature guard when using two-node model.
+- **Soft ΔT constraint:** max_i T_can,i − min_i T_can,i < ΔT_max (default 5 °C). The inter-cell spread is computed on CAN temperatures (externally observable).
+
+Named constraint fields in `thermal_constraints` YAML section:
+```yaml
+thermal_constraints:
+  max_cell_temperature_c: 35.0       # backward-compat primary limit
+  max_temperature_delta_c: 5.0       # inter-cell ΔT
+  # max_core_temperature_c: 35.0    # T6: core safety limit (defaults to max_cell)
+  # max_can_temperature_c: 35.0     # T6: surface limit (defaults to max_cell)
+```
+
+`SimResult` now tracks `violation_core_count`, `violation_can_count`, and `violation_core_time_s`, `violation_can_time_s` separately, enabling per-type constraint auditing.
 
 This is a soft-constrained, input-bound-constrained nonlinear MPC. The nonlinearity comes from the h_conv(ṁ) dependence; the rest of the dynamics are linear in state.
 

@@ -38,6 +38,9 @@ convection:
 thermal_constraints:
   max_cell_temperature_c: 35.0
   max_temperature_delta_c: 5.0
+  # T6: Named two-node-aware constraints (default to max_cell_temperature_c when absent)
+  # max_core_temperature_c: 35.0
+  # max_can_temperature_c: 35.0
 
 pump:
   min_flow_kg_per_s: 0.01

@@ -14,8 +14,8 @@ public:
     MpcController(const model::ThermalModel&          model,
                   int                                  horizon,
                   double                               setpoint_c,
-                  double                               T_max_constraint,  ///< from thermal_constraints.max_cell_temperature_c
-                  double                               dT_max_constraint, ///< from thermal_constraints.max_temperature_delta_c
+                  double                               T_max_constraint,    ///< core temp limit
+                  double                               dT_max_constraint,   ///< inter-cell ΔT limit
                   double                               w_track,
                   double                               w_delta_t,
                   double                               w_pump,
@@ -24,7 +24,10 @@ public:
                   double                               soft_dT_penalty,
                   const solver::GradientDescentSolver& solver,
                   core::MassFlowRate                   mdot_min,
-                  core::MassFlowRate                   mdot_max);
+                  core::MassFlowRate                   mdot_max,
+                  // T6: optional can temperature constraint (0.0 = use T_max_constraint)
+                  double                               T_can_constraint   = 0.0,
+                  double                               soft_T_can_penalty = 0.0);
 
     /// Compute the optimal mass-flow command via single-shooting gradient descent.
     ///
@@ -49,6 +52,8 @@ private:
     double                               w_slew_;
     double                               soft_T_max_penalty_;
     double                               soft_dT_penalty_;
+    double                               T_can_constraint_;     ///< T6: can temperature limit
+    double                               soft_T_can_penalty_;   ///< T6: penalty when T_can > limit
     const solver::GradientDescentSolver& solver_;
     core::MassFlowRate                   mdot_min_;
     core::MassFlowRate                   mdot_max_;

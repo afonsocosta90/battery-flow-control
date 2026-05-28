@@ -61,9 +61,10 @@ int main(int argc, char* argv[]) {
                 cfg.simulation.log_path,
                 current_fn,
                 inlet_fn,
-                cfg.thermal_constraints.max_cell_temperature_c,
+                cfg.thermal_constraints.max_core_temperature_c,  // T6: named core constraint
                 cfg.thermal_constraints.max_temperature_delta_c,
-                sensor
+                sensor,
+                cfg.thermal_constraints.max_can_temperature_c    // T6: named can constraint
             );
 
             simulator.run();   // summary printed + JSON written
@@ -80,7 +81,7 @@ int main(int argc, char* argv[]) {
                 thermal_model,
                 cfg.mpc.horizon_steps,
                 cfg.mpc.setpoint_c,
-                cfg.thermal_constraints.max_cell_temperature_c,
+                cfg.thermal_constraints.max_core_temperature_c,  // T6: core constraint
                 cfg.thermal_constraints.max_temperature_delta_c,
                 cfg.mpc.weights.tracking,
                 cfg.mpc.weights.delta_t,
@@ -90,7 +91,9 @@ int main(int argc, char* argv[]) {
                 cfg.mpc.soft_dT_penalty,
                 solver,
                 btm::core::MassFlowRate{cfg.pump.min_flow_kg_per_s},
-                btm::core::MassFlowRate{cfg.pump.max_flow_kg_per_s}
+                btm::core::MassFlowRate{cfg.pump.max_flow_kg_per_s},
+                cfg.thermal_constraints.max_can_temperature_c,   // T6: can constraint
+                cfg.mpc.soft_T_can_penalty                        // T6: can penalty
             );
 
             // MPC uses the perfect sensor internally; pass perfect to the logger too
@@ -103,9 +106,10 @@ int main(int argc, char* argv[]) {
                 cfg.simulation.log_path,
                 current_fn,
                 inlet_fn,
-                cfg.thermal_constraints.max_cell_temperature_c,
+                cfg.thermal_constraints.max_core_temperature_c,  // T6: core constraint
                 cfg.thermal_constraints.max_temperature_delta_c,
-                btm::sim::SensorModel{}   // perfect sensor for MPC logging
+                btm::sim::SensorModel{},                          // perfect sensor for MPC logging
+                cfg.thermal_constraints.max_can_temperature_c    // T6: can constraint
             );
 
             simulator.run();

@@ -21,7 +21,8 @@ Simulator<Controller>::Simulator(model::ThermalModel& model,
                                  std::function<core::Temperature(core::Duration)> inlet_fn,
                                  double T_max_constraint,
                                  double dT_max_constraint,
-                                 SensorModel sensor)
+                                 SensorModel sensor,
+                                 double T_can_constraint)
     : model_(model),
       controller_(controller),
       dt_(dt),
@@ -31,6 +32,8 @@ Simulator<Controller>::Simulator(model::ThermalModel& model,
       inlet_fn_(std::move(inlet_fn)),
       T_max_constraint_(T_max_constraint),
       dT_max_constraint_(dT_max_constraint),
+      // T6: can constraint defaults to core constraint (correct for single-node mode)
+      T_can_constraint_(T_can_constraint > 0.0 ? T_can_constraint : T_max_constraint),
       sensor_(std::move(sensor)) {}
 
 template <typename Controller>
@@ -67,14 +70,27 @@ SimResult Simulator<Controller>::run() {
         // Safety constraints enforce on CORE temperature (T_core ≥ T_can always).
         // In single-node mode max_core_temp() == max_cell_temp() — backward-compatible.
         const double T_core_max = state.max_core_temp().value;
+        const double T_can_max  = state.max_cell_temp().value;  // can / surface temperature
         const double dT         = state.delta_t().value;
 
-        const bool T_viol  = T_core_max > T_max_constraint_;
-        const bool dT_viol = dT         > dT_max_constraint_;
-        if (T_viol || dT_viol) {
+        // T6: Track core and can violations separately
+        const bool T_core_viol = T_core_max > T_max_constraint_;
+        const bool T_can_viol  = T_can_max  > T_can_constraint_;
+        const bool dT_viol     = dT         > dT_max_constraint_;
+
+        if (T_core_viol) {
+            ++result.violation_core_count;
+            result.violation_core_time_s += dt_.value;
+        }
+        if (T_can_viol) {
+            ++result.violation_can_count;
+            result.violation_can_time_s += dt_.value;
+        }
+        // Legacy combined violation count: any constraint exceeded
+        if (T_core_viol || dT_viol) {
             ++result.violation_count;
             result.violation_time_s += dt_.value;
-            if (T_viol)
+            if (T_core_viol)
                 result.violation_T_integral_c_s += (T_core_max - T_max_constraint_) * dt_.value;
         }
 
@@ -102,13 +118,17 @@ SimResult Simulator<Controller>::run() {
     // Print human-readable summary
     std::cout << std::fixed << std::setprecision(3)
               << "=== Simulation complete: " << result.steps << " steps ===\n"
-              << "  Peak T_core      : " << result.peak_T_max_c      << " °C\n"
-              << "  Time-avg T_core  : " << result.time_avg_T_max_c  << " °C\n"
-              << "  Peak ΔT          : " << result.peak_dT_c         << " °C\n"
-              << "  ∫ṁ² dt           : " << result.pump_integral     << " (kg/s)²·s\n"
-              << "  Violations       : " << result.violation_count   << " steps"
+              << "  Peak T_core      : " << result.peak_T_max_c           << " °C\n"
+              << "  Time-avg T_core  : " << result.time_avg_T_max_c       << " °C\n"
+              << "  Peak ΔT          : " << result.peak_dT_c              << " °C\n"
+              << "  ∫ṁ² dt           : " << result.pump_integral          << " (kg/s)²·s\n"
+              << "  Violations (any) : " << result.violation_count        << " steps"
               << " (" << result.violation_time_s << " s)\n"
-              << "  ∫(T-T_max)⁺ dt   : " << result.violation_T_integral_c_s << " °C·s\n";
+              << "  Viol. T_core     : " << result.violation_core_count   << " steps"
+              << " (" << result.violation_core_time_s << " s)\n"
+              << "  Viol. T_can      : " << result.violation_can_count    << " steps"
+              << " (" << result.violation_can_time_s << " s)\n"
+              << "  ∫(T_core-T_lim)⁺: " << result.violation_T_integral_c_s << " °C·s\n";
 
     // Write machine-readable JSON summary
     const std::string json_path = [&] {
@@ -122,14 +142,18 @@ SimResult Simulator<Controller>::run() {
     {
         std::ofstream js(json_path);
         js << std::fixed << std::setprecision(6) << "{\n"
-           << "  \"steps\": "                       << result.steps                    << ",\n"
-           << "  \"peak_T_max_c\": "                << result.peak_T_max_c             << ",\n"
-           << "  \"time_avg_T_max_c\": "            << result.time_avg_T_max_c         << ",\n"
-           << "  \"peak_dT_c\": "                   << result.peak_dT_c               << ",\n"
-           << "  \"violation_count\": "             << result.violation_count          << ",\n"
-           << "  \"violation_time_s\": "            << result.violation_time_s         << ",\n"
-           << "  \"violation_T_integral_c_s\": "   << result.violation_T_integral_c_s << ",\n"
-           << "  \"pump_integral\": "               << result.pump_integral            << "\n"
+           << "  \"steps\": "                        << result.steps                    << ",\n"
+           << "  \"peak_T_max_c\": "                 << result.peak_T_max_c             << ",\n"
+           << "  \"time_avg_T_max_c\": "             << result.time_avg_T_max_c         << ",\n"
+           << "  \"peak_dT_c\": "                    << result.peak_dT_c                << ",\n"
+           << "  \"violation_count\": "              << result.violation_count           << ",\n"
+           << "  \"violation_time_s\": "             << result.violation_time_s          << ",\n"
+           << "  \"violation_T_integral_c_s\": "    << result.violation_T_integral_c_s  << ",\n"
+           << "  \"violation_core_count\": "         << result.violation_core_count      << ",\n"
+           << "  \"violation_core_time_s\": "        << result.violation_core_time_s     << ",\n"
+           << "  \"violation_can_count\": "          << result.violation_can_count       << ",\n"
+           << "  \"violation_can_time_s\": "         << result.violation_can_time_s      << ",\n"
+           << "  \"pump_integral\": "                << result.pump_integral             << "\n"
            << "}\n";
     }
 

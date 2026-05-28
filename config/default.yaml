@@ -40,8 +40,11 @@ convection:
   # nusselt_n: 0.333         # Pr exponent
 
 thermal_constraints:
-  max_cell_temperature_c: 35.0
-  max_temperature_delta_c: 5.0
+  max_cell_temperature_c: 35.0      # backward-compat primary limit; also the default for the two below
+  max_temperature_delta_c: 5.0      # inter-cell ΔT (can temperatures)
+  # T6: Named two-node-aware constraints (default to max_cell_temperature_c when absent)
+  # max_core_temperature_c: 35.0   # jellyroll core safety limit (= max_cell_temperature_c by default)
+  # max_can_temperature_c: 35.0    # can/surface limit (= max_cell_temperature_c by default)
 
 pump:
   min_flow_kg_per_s: 0.01

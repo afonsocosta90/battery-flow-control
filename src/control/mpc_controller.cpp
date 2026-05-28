@@ -20,7 +20,9 @@ MpcController::MpcController(const model::ThermalModel& model,
                              double soft_dT_penalty,
                              const solver::GradientDescentSolver& solver,
                              core::MassFlowRate mdot_min,
-                             core::MassFlowRate mdot_max)
+                             core::MassFlowRate mdot_max,
+                             double T_can_constraint,
+                             double soft_T_can_penalty)
     : model_(model),
       horizon_(horizon),
       setpoint_c_(setpoint_c),
@@ -32,6 +34,9 @@ MpcController::MpcController(const model::ThermalModel& model,
       w_slew_(w_slew),
       soft_T_max_penalty_(soft_T_max_penalty),
       soft_dT_penalty_(soft_dT_penalty),
+      // T6: can constraint defaults to core constraint (single-node backward-compat)
+      T_can_constraint_(T_can_constraint > 0.0 ? T_can_constraint : T_max_constraint),
+      soft_T_can_penalty_(soft_T_can_penalty),
       solver_(solver),
       mdot_min_(mdot_min),
       mdot_max_(mdot_max) {
@@ -104,6 +109,14 @@ double MpcController::evaluate_cost(const model::ThermalState& current_state,
         if (Tmax > T_max_constraint_) {
             const double excess = Tmax - T_max_constraint_;
             cost += soft_T_max_penalty_ * excess * excess;
+        }
+        // T6: Soft constraint: T_can < T_can_constraint (surface temperature guard)
+        if (soft_T_can_penalty_ > 0.0) {
+            const double T_can = s.max_cell_temp().value;
+            if (T_can > T_can_constraint_) {
+                const double excess = T_can - T_can_constraint_;
+                cost += soft_T_can_penalty_ * excess * excess;
+            }
         }
         // Soft constraint: ΔT < dT_max_constraint (from thermal_constraints config)
         if (dT > dT_max_constraint_) {

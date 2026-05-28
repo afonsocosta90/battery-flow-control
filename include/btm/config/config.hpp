@@ -69,8 +69,24 @@ struct ConvectionParams {
 };
 
 struct ThermalConstraints {
+    // ── Backward-compatible primary constraint ────────────────────────────────
+    /// Safety limit on cell temperature.  In single-node mode this is the only
+    /// constraint needed.  In two-node mode it is used as the fallback default
+    /// for max_core_temperature_c and max_can_temperature_c when those are absent.
     double max_cell_temperature_c{0.0};
-    double max_temperature_delta_c{0.0};
+    double max_temperature_delta_c{0.0};   ///< inter-cell ΔT limit (°C)
+
+    // ── T6: Named two-node-aware constraints (DESIGN.md §3.2.3) ─────────────
+    /// Hard safety limit on the jellyroll core temperature (°C).
+    /// Defaults to max_cell_temperature_c if absent from YAML.
+    /// Violations are logged to SimResult.violation_core_count.
+    double max_core_temperature_c{0.0};
+
+    /// Surface (can) temperature limit (°C).
+    /// Typically equal to or slightly above max_core_temperature_c since the
+    /// core is always hotter than the can under load.
+    /// Defaults to max_cell_temperature_c if absent from YAML.
+    double max_can_temperature_c{0.0};
 };
 
 struct PumpLimits {
@@ -94,9 +110,14 @@ struct MpcSolverParams {
 
 struct MpcConfig {
     int horizon_steps{0};
-    double setpoint_c{35.0};           // temperature tracking target (default = constraint)
-    double soft_T_max_penalty{10000.0};// quadratic penalty weight: T_cell > T_max_constraint
-    double soft_dT_penalty{10000.0};   // quadratic penalty weight: ΔT  > dT_max_constraint
+    double setpoint_c{35.0};              ///< temperature tracking target (default = constraint)
+
+    // ── Soft constraint penalties ─────────────────────────────────────────────
+    double soft_T_max_penalty{10000.0};   ///< quadratic penalty: T_core > max_core_temperature_c
+    double soft_T_can_penalty{0.0};       ///< T6: quadratic penalty: T_can > max_can_temperature_c
+                                          ///<   (0.0 = disabled by default; only active in two-node)
+    double soft_dT_penalty{10000.0};      ///< quadratic penalty: ΔT > max_temperature_delta_c
+
     MpcWeights weights;
     MpcSolverParams solver;
 };

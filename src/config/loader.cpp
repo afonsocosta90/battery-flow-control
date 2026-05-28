@@ -156,6 +156,16 @@ Config load_and_validate(const std::string& path) {
     require_positive(cfg.thermal_constraints.max_cell_temperature_c, "thermal_constraints.max_cell_temperature_c");
     require_positive(cfg.thermal_constraints.max_temperature_delta_c, "thermal_constraints.max_temperature_delta_c");
 
+    // T6: Named two-node-aware constraints (default to max_cell_temperature_c)
+    cfg.thermal_constraints.max_core_temperature_c = tc["max_core_temperature_c"]
+        ? tc["max_core_temperature_c"].as<double>()
+        : cfg.thermal_constraints.max_cell_temperature_c;
+    cfg.thermal_constraints.max_can_temperature_c = tc["max_can_temperature_c"]
+        ? tc["max_can_temperature_c"].as<double>()
+        : cfg.thermal_constraints.max_cell_temperature_c;
+    require_positive(cfg.thermal_constraints.max_core_temperature_c, "thermal_constraints.max_core_temperature_c");
+    require_positive(cfg.thermal_constraints.max_can_temperature_c, "thermal_constraints.max_can_temperature_c");
+
     // --- pump ---
     auto pump = root["pump"];
     if (!pump) throw std::runtime_error("Missing top-level key 'pump'");
@@ -236,8 +246,9 @@ Config load_and_validate(const std::string& path) {
     if (auto m = ctrl["mpc"]) {
         cfg.mpc.horizon_steps = m["horizon_steps"].as<int>();
         require_int_positive(cfg.mpc.horizon_steps, "mpc.horizon_steps");
-        cfg.mpc.setpoint_c = m["setpoint_c"] ? m["setpoint_c"].as<double>() : 35.0;
+        cfg.mpc.setpoint_c         = m["setpoint_c"]         ? m["setpoint_c"].as<double>()         : 35.0;
         cfg.mpc.soft_T_max_penalty = m["soft_T_max_penalty"] ? m["soft_T_max_penalty"].as<double>() : 10000.0;
+        cfg.mpc.soft_T_can_penalty = m["soft_T_can_penalty"] ? m["soft_T_can_penalty"].as<double>() : 0.0;
         cfg.mpc.soft_dT_penalty    = m["soft_dT_penalty"]    ? m["soft_dT_penalty"].as<double>()    : 10000.0;
 
         auto w = m["weights"];

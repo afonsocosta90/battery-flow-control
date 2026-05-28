@@ -19,21 +19,27 @@ namespace btm::sim {
 struct SimResult {
     int    steps{0};
 
-    // Temperature metrics
-    double peak_T_max_c{0.0};      ///< Peak true max cell temperature over the run (°C)
-    double peak_dT_c{0.0};         ///< Peak true inter-cell ΔT over the run (°C)
-    double time_avg_T_max_c{0.0};  ///< Time-averaged true max cell temperature (°C)
+    // ── Temperature metrics ──────────────────────────────────────────────────
+    double peak_T_max_c{0.0};      ///< Peak core temperature over the run (°C)
+    double peak_dT_c{0.0};         ///< Peak inter-cell ΔT (can temps) over the run (°C)
+    double time_avg_T_max_c{0.0};  ///< Time-averaged core temperature (°C)
 
-    // Constraint violation
-    /// Number of timesteps in which T_max > T_max_constraint OR ΔT > dT_max_constraint.
+    // ── T6: Named two-node constraint violations ─────────────────────────────
+    /// Timesteps where T_core > max_core_temperature_c or ΔT > max_temperature_delta_c.
     int    violation_count{0};
-    /// Cumulative time spent above any constraint [s] = violation_count * dt.
     double violation_time_s{0.0};
-    /// Integral of the excess over the temperature constraint [°C·s].
-    double violation_T_integral_c_s{0.0};
+    double violation_T_integral_c_s{0.0};  ///< ∫(T_core − T_core_limit)⁺ dt
 
-    // Pump energy
-    double pump_integral{0.0};      ///< ∫ṁ² dt [(kg/s)²·s]  — control effort proxy
+    /// Timesteps where T_core > max_core_temperature_c (core-only violation tracking).
+    int    violation_core_count{0};
+    double violation_core_time_s{0.0};
+
+    /// Timesteps where T_can > max_can_temperature_c (surface temperature guard).
+    int    violation_can_count{0};
+    double violation_can_time_s{0.0};
+
+    // ── Pump energy ──────────────────────────────────────────────────────────
+    double pump_integral{0.0};     ///< ∫ṁ² dt [(kg/s)²·s]  — control effort proxy
 };
 
 // ---------------------------------------------------------------------------
@@ -48,9 +54,10 @@ public:
               const std::string& log_path,
               std::function<core::Current(core::Duration)> current_fn,
               std::function<core::Temperature(core::Duration)> inlet_fn,
-              double T_max_constraint,    ///< from thermal_constraints.max_cell_temperature_c
-              double dT_max_constraint,   ///< from thermal_constraints.max_temperature_delta_c
-              SensorModel sensor = SensorModel{});  ///< logging observability model (default: perfect)
+              double T_max_constraint,         ///< core temperature limit (from thermal_constraints)
+              double dT_max_constraint,        ///< inter-cell ΔT limit
+              SensorModel sensor = SensorModel{},   ///< logging observability (default: perfect)
+              double T_can_constraint = 0.0);  ///< T6: can temperature limit (0.0 = use T_max_constraint)
 
     /// Run the simulation.  Returns comprehensive metrics and also writes a JSON
     /// summary to <log_path>_summary.json for machine-readable downstream use.
@@ -66,8 +73,9 @@ private:
     std::function<core::Current(core::Duration)> current_fn_;
     std::function<core::Temperature(core::Duration)> inlet_fn_;
 
-    double T_max_constraint_;
+    double T_max_constraint_;    ///< core temperature limit
     double dT_max_constraint_;
+    double T_can_constraint_;    ///< T6: can/surface temperature limit
     SensorModel sensor_;
 };
 
