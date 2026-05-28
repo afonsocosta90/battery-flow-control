@@ -161,7 +161,7 @@ cd build && ctest --output-on-failure
 | `MpcSolver` | 5 | Convergence to known interior optimum; box-constraint projection; warm-start sequence reuse; scalar and vector cost cases |
 | `Integration` | 4 | Full PID + MPC end-to-end runs; downstream-sensor PID run; output CSV produced for both controllers |
 | `ConfigValidation` | 3 | YAML loading; missing/invalid keys; out-of-range values |
-| `CoreTypes` | 4 | Strong-type arithmetic; compile-time unit-safety static assertions |
+| `StrongTypes` | 4 | Strong-type arithmetic; compile-time unit-safety static assertions |
 | **Total** | **51** | |
 
 **Non-negotiable invariants:** `ThermalModel.EnergyConservation` and

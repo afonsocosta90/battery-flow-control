@@ -178,10 +178,13 @@ def plot_scenario(df_pid: pd.DataFrame, df_mpc: pd.DataFrame,
     fig, axes = plt.subplots(3, 1, figsize=(11, 7), sharex=True)
     fig.suptitle(sc["label"], fontsize=13, fontweight="bold", y=1.01)
 
-    # ── T_max ──────────────────────────────────────────────────────────────
+    # ── T_max (can) and T_core_max if present ──────────────────────────────
     ax = axes[0]
-    ax.plot(df_pid["t"], df_pid["T_max"], color=ORANGE, lw=1.4, label="PID")
-    ax.plot(df_mpc["t"], df_mpc["T_max"], color=BLUE,   lw=1.4, label="MPC")
+    ax.plot(df_pid["t"], df_pid["T_max"], color=ORANGE, lw=1.4, label="PID T_can")
+    ax.plot(df_mpc["t"], df_mpc["T_max"], color=BLUE,   lw=1.4, label="MPC T_can")
+    if "T_core_max" in df_pid.columns and df_pid["T_core_max"].max() > df_pid["T_max"].max() + 0.01:
+        ax.plot(df_pid["t"], df_pid["T_core_max"], color=ORANGE, lw=1.0, ls=":", label="PID T_core")
+        ax.plot(df_mpc["t"], df_mpc["T_core_max"], color=BLUE,   lw=1.0, ls=":", label="MPC T_core")
     ax.axhline(T_limit, color=RED, ls="--", lw=1.1, label=f"Limit {T_limit} °C")
     if sc["step_time"]:
         ax.axvline(sc["step_time"], color="grey", ls=":", lw=1.0)
@@ -446,7 +449,12 @@ def build_report(loaded_scenarios: list) -> str:
     to <strong>one effective node per series position</strong>, reducing the state from 312 to 24
     nodes with no loss of physical fidelity.</p>
     <p>The simulation state at each timestep is:</p>
-    <pre>ThermalState = { T_cell[0..23],  T_coolant[0..23] }   (°C)</pre>
+    <pre>ThermalState = { T_can[0..23],   T_core[0..23],  T_coolant[0..23] }   (°C)
+              ↑ surface (cell_temperatures)  ↑ jellyroll  ↑ coolant</pre>
+    <p>In the default <strong>single-node</strong> mode <code>cell.model: single_node</code>,
+    <code>T_core == T_can</code> at all positions and all prior CI thresholds are unchanged.
+    The optional <strong>two-node</strong> mode (<code>cell.model: two_node</code>) adds a
+    separate jellyroll core node; see §2.3.</p>
 
     <h3>2.2 Heat Generation — Ohmic Only</h3>
     <p>Using the η<sub>IR,1C</sub> parameter fitted by Levenberg-Marquardt optimisation on the
@@ -461,7 +469,9 @@ At 5C: I_cell = 22.5 A  →  Q_cell ≈ 8.76 W  →  Q_module ≈ 2.73 kW</pre>
 
     <h3>2.3 Cell Thermal Dynamics — Explicit Euler</h3>
     <p>Lumped energy balance per series position i, discretised with explicit Euler (dt = 0.1 s):</p>
-    <pre>C_th · dT_cell,i/dt  =  Q_cell  −  h(ṁ) · A · (T_cell,i − T_coolant,i)
+    <pre><strong>Single-node (default — cell.model: single_node)</strong>
+
+C_th · dT_cell,i/dt  =  Q_cell  −  h(ṁ) · A · (T_cell,i − T_coolant,i)
 
 T_cell,i(t+dt)  =  T_cell,i(t)
                +  [Q_cell − h(ṁ)·A·(T_cell,i(t) − T_coolant,i(t))] · dt / C_th
@@ -470,6 +480,17 @@ C_th  =  m_cell · cp_cell  =  0.070 kg × 900 J/(kg·K)  =  63 J/K  (per cell)
 A     =  0.00475 m²  (cell surface area, 2πrh + 2πr², 21700 geometry)</pre>
     <p><em>Stability note:</em> The thermal time constant τ = C_th / (h·A) ≈ 63/9 ≈ 7 s.
     At dt = 0.1 s, the explicit Euler stability criterion dt ≤ τ is comfortably satisfied.</p>
+    <pre><strong>Two-node (optional — cell.model: two_node)</strong>
+
+Adds a separate jellyroll core node coupled to the can shell through an
+internal thermal resistance R_core_can. Heat is generated only in the core:
+
+  C_core · dT_core,i/dt  =  Q_cell − (T_core,i − T_can,i) / R_core_can
+  C_can  · dT_can,i/dt   = (T_core,i − T_can,i) / R_core_can − h·A·(T_can,i − T_coolant,i)
+
+where C_core = (1 − f)·C_th,  C_can = f·C_th,  f = 0.10 (10% of mass in Al can wall).
+At 5C steady state, the analytical core–can gradient is Q × R = 8.76 × 0.8 ≈ 7 °C.
+Default parameters: r_core_can_k_per_w = 0.8, c_can_fraction = 0.10.</pre>
 
     <h3>2.4 Algebraic Coolant Chain — Successive Substitution</h3>
     <p>Coolant has no thermal inertia at this resolution (transit time ≪ dt). Its temperature at
@@ -489,12 +510,27 @@ Three passes of successive substitution reduce the residual below 0.02 °C
     temperatures. Interleaving the two phases (an earlier bug) would effectively integrate
     cell temperatures three times.</p>
 
-    <h3>2.5 Convective Coefficient — Power-Law Fit</h3>
-    <pre>h(ṁ)  =  h_ref · (ṁ / ṁ_ref)^n
+    <h3>2.5 Convective Coefficient</h3>
+    <p>Two selectable models via <code>convection.model</code> in YAML:</p>
+    <pre><strong>Power-law (default — convection.model: power_law)</strong>
+
+h(ṁ)  =  h_ref · (ṁ / ṁ_ref)^n
 
 h_ref  =  250 W/(m²·K)   (calibrated: model peaks ~30 °C at 5C nominal scenario)
 ṁ_ref  =  0.5 kg/s
-n      =  0.6             (standard forced-convection scaling for a cylinder)</pre>
+n      =  0.6             (standard forced-convection scaling for a cylinder)
+
+<strong>Nusselt correlation (convection.model: nusselt_correlation)</strong>
+
+Derived from first principles using Shell E5 TM 410 fluid properties:
+
+  Re  = ṁ · D_h / (A_flow · μ)        [Re ≈ 600 at ṁ = 0.5 kg/s → laminar]
+  Pr  = μ · cp / k                     [Pr ≈ 338 for this dielectric oil]
+  Nu  = c · Re^m · Pr^n               [Sieder-Tate laminar: c=0.197, m=n=0.333]
+  h   = Nu · k / D_h                   [≈ 250 W/(m²·K) at calibration point]
+
+Both models give identical h at the reference point (250 W/(m²·K) at 0.5 kg/s)
+and are monotonically increasing with ṁ — verified in the test suite.</pre>
 
     <h3>2.6 Parameters</h3>
     <table class="param-table">
@@ -550,13 +586,23 @@ concept Controller = requires(C&amp; c, const ThermalState&amp; s,
 };</pre>
 
     <h3>3.2 PID Baseline</h3>
-    <pre>e(t)  =  T_max(t) − T_setpoint
-u(t)  =  kp · e(t)  +  ki · ∫e(τ)dτ         (anti-windup: integrator clamped)
-ṁ(t)  =  clamp(u(t),  ṁ_min,  ṁ_max)
+    <pre>T_obs(t)  =  sensor.observed_max(state)     ← configurable SensorModel
+e(t)      =  T_obs(t) − T_setpoint
+u(t)      =  kp · e(t)  +  ki · ∫e_eff(τ)dτ
+ṁ(t)      =  clamp(u(t),  ṁ_min,  ṁ_max)
 
-Configured: kp = 0.20, ki = 0.005, T_setpoint = 32 °C</pre>
+Configured: kp = 0.20, ki = 0.005, T_setpoint = 32 °C, sensor = perfect</pre>
     <p>The conservative setpoint (32 °C vs 35 °C limit) ensures constraint satisfaction but
     over-cools the module by ~3 °C, wasting pump energy unnecessarily.</p>
+    <p><strong>Sensor modes</strong> (<code>sensor.mode</code> in YAML): <code>perfect</code>
+    (true global maximum, default), <code>downstream</code> (cell[23] — the physically hottest
+    position), <code>sparse</code> (max of named positions). Violations are always counted
+    against the true physical state regardless of sensor mode.</p>
+    <p><strong>Back-calculation anti-windup:</strong> when the output saturates, the integrator
+    is back-calculated to the exact value that would produce the saturated output, preventing
+    integrator wind-up on load steps or maximum-flow periods.</p>
+    <p><strong>Deadband</strong> (<code>pid.deadband_c</code>): errors below the threshold are
+    treated as zero — no actuation, no integrator accumulation. Default 0.0 (disabled).</p>
 
     <h3>3.3 MPC Formulation</h3>
     <p><strong>Decision variable:</strong> input sequence u = [ṁ<sub>0</sub>, …, ṁ<sub>N−1</sub>],

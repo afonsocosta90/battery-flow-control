@@ -387,7 +387,7 @@ ctest -R ThermalModel               # single suite
 | `MpcSolver` | 5 | **Convergence to known optimum** on synthetic quadratic. If this fails after a solver change, the solver is broken. |
 | `Integration` | 4 | Full PID + MPC end-to-end runs; downstream-sensor PID; output CSV produced |
 | `ConfigValidation` | 3 | Missing keys, out-of-range, cross-field checks |
-| `CoreTypes` | 4 | Strong-type arithmetic, compile-time unit safety |
+| `StrongTypes` | 4 | Strong-type arithmetic, compile-time unit safety |
 
 ---
 
