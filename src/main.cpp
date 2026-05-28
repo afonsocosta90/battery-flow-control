@@ -3,6 +3,7 @@
 #include "btm/control/pid_controller.hpp"
 #include "btm/model/thermal_model.hpp"
 #include "btm/scenario/scenario.hpp"
+#include "btm/sim/sensor_model.hpp"
 #include "btm/sim/simulator.hpp"
 #include "btm/solver/gradient_descent.hpp"
 
@@ -34,6 +35,12 @@ int main(int argc, char* argv[]) {
         // Build scenario functions (current_at, inlet_at)
         auto [current_fn, inlet_fn] = btm::scenario::make_scenario(cfg);
 
+        // Sensor model — shared between PID and logger.
+        // MPC always uses the perfect (full-state) model internally; only PID
+        // and the logging column are affected by the configured sensor.
+        const btm::sim::SensorModel sensor =
+            btm::sim::SensorModel::from_string(cfg.sensor.mode, cfg.sensor.positions);
+
         if (controller_type == "pid") {
             btm::control::PidController pid(
                 cfg.pid.kp,
@@ -41,7 +48,9 @@ int main(int argc, char* argv[]) {
                 cfg.pid.setpoint_c,
                 cfg.pid.integrator_limit,
                 btm::core::MassFlowRate{cfg.pump.min_flow_kg_per_s},
-                btm::core::MassFlowRate{cfg.pump.max_flow_kg_per_s}
+                btm::core::MassFlowRate{cfg.pump.max_flow_kg_per_s},
+                cfg.pid.deadband_c,
+                sensor
             );
 
             btm::sim::Simulator simulator(
@@ -53,7 +62,8 @@ int main(int argc, char* argv[]) {
                 current_fn,
                 inlet_fn,
                 cfg.thermal_constraints.max_cell_temperature_c,
-                cfg.thermal_constraints.max_temperature_delta_c
+                cfg.thermal_constraints.max_temperature_delta_c,
+                sensor
             );
 
             simulator.run();
@@ -83,6 +93,8 @@ int main(int argc, char* argv[]) {
                 btm::core::MassFlowRate{cfg.pump.max_flow_kg_per_s}
             );
 
+            // MPC uses the perfect sensor internally; pass perfect to the logger too
+            // so T_max_observed == T_max (no logging artefact for MPC runs).
             btm::sim::Simulator simulator(
                 thermal_model,
                 mpc,
@@ -92,7 +104,8 @@ int main(int argc, char* argv[]) {
                 current_fn,
                 inlet_fn,
                 cfg.thermal_constraints.max_cell_temperature_c,
-                cfg.thermal_constraints.max_temperature_delta_c
+                cfg.thermal_constraints.max_temperature_delta_c,
+                btm::sim::SensorModel{}   // perfect sensor for MPC logging
             );
 
             simulator.run();

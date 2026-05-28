@@ -43,6 +43,10 @@ scenario:
   type: constant_c_rate            # constant_c_rate | step_transient | rising_ambient
   c_rate: 5.0
 
+sensor:
+  mode: perfect                    # perfect | downstream | sparse
+  # positions: [7, 15, 23]        # (sparse only) series-position indices to observe
+
 controller:
   type: mpc                        # pid | mpc
   pid:
@@ -50,6 +54,7 @@ controller:
     ki: 0.005
     setpoint_c: 32.0               # targets 32 °C → over-cools ~3 °C → excess pump energy
     integrator_limit: 100.0
+    deadband_c: 0.0                # |error| < deadband_c treated as zero (0.0 = disabled)
   mpc:
     horizon_steps: 20
     setpoint_c: 34.9               # track 0.1 °C below hard limit — numerical margin

@@ -3,6 +3,7 @@
 #include "btm/core/types.hpp"
 #include "btm/model/thermal_state.hpp"
 #include "btm/model/thermal_model.hpp"
+#include "btm/sim/sensor_model.hpp"
 
 #include <functional>
 #include <string>
@@ -19,8 +20,9 @@ public:
               const std::string& log_path,
               std::function<core::Current(core::Duration)> current_fn,
               std::function<core::Temperature(core::Duration)> inlet_fn,
-              double T_max_constraint,   ///< from thermal_constraints.max_cell_temperature_c
-              double dT_max_constraint); ///< from thermal_constraints.max_temperature_delta_c
+              double T_max_constraint,    ///< from thermal_constraints.max_cell_temperature_c
+              double dT_max_constraint,   ///< from thermal_constraints.max_temperature_delta_c
+              SensorModel sensor = SensorModel{});  ///< logging observability model (default: perfect)
 
     void run();
 
@@ -36,6 +38,7 @@ private:
 
     double T_max_constraint_;
     double dT_max_constraint_;
+    SensorModel sensor_;
 };
 
 } // namespace btm::sim

@@ -53,6 +53,9 @@ scenario:
   ramp_start_s: 60.0
   ramp_duration_s: 180.0
 
+sensor:
+  mode: perfect                    # perfect | downstream | sparse
+
 controller:
   type: mpc
   pid:
@@ -60,6 +63,7 @@ controller:
     ki: 0.005                      # reactive (not predictive) to rising T_inlet
     setpoint_c: 32.0
     integrator_limit: 100.0
+    deadband_c: 0.0                # |error| < deadband_c treated as zero (0.0 = disabled)
   mpc:
     horizon_steps: 20
     setpoint_c: 34.9               # 0.1 °C below hard limit for numerical margin

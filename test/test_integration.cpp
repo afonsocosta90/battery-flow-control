@@ -3,6 +3,7 @@
 #include "btm/control/pid_controller.hpp"
 #include "btm/model/thermal_model.hpp"
 #include "btm/scenario/scenario.hpp"
+#include "btm/sim/sensor_model.hpp"
 #include "btm/sim/simulator.hpp"
 #include "btm/solver/gradient_descent.hpp"
 
@@ -134,6 +135,37 @@ TEST(Integration, MpcRunCompletes) {
         cfg.thermal_constraints.max_temperature_delta_c);
 
     EXPECT_NO_THROW(sim.run());
+    EXPECT_TRUE(std::filesystem::exists(cfg.simulation.log_path));
+}
+
+TEST(Integration, PidWithDownstreamSensorRunsCorrectly) {
+    // Verify that a PID using the Downstream sensor model runs without error
+    // and produces a log file.  Also checks that the Controller concept is
+    // satisfied when a non-default SensorModel is provided.
+    auto cfg = make_test_config("/tmp/test_pid_downstream.csv");
+    model::ThermalModel model(cfg);
+    auto [current_fn, inlet_fn] = scenario::make_scenario(cfg);
+
+    const auto sensor = sim::SensorModel::from_string("downstream");
+
+    control::PidController pid(
+        cfg.pid.kp, cfg.pid.ki, cfg.pid.setpoint_c, cfg.pid.integrator_limit,
+        core::MassFlowRate{cfg.pump.min_flow_kg_per_s},
+        core::MassFlowRate{cfg.pump.max_flow_kg_per_s},
+        0.0,    // deadband_c
+        sensor);
+
+    sim::Simulator sim_ds(
+        model, pid,
+        core::Duration{cfg.simulation.timestep_s},
+        core::Duration{cfg.simulation.duration_s},
+        cfg.simulation.log_path,
+        current_fn, inlet_fn,
+        cfg.thermal_constraints.max_cell_temperature_c,
+        cfg.thermal_constraints.max_temperature_delta_c,
+        sensor);
+
+    EXPECT_NO_THROW(sim_ds.run());
     EXPECT_TRUE(std::filesystem::exists(cfg.simulation.log_path));
 }
 

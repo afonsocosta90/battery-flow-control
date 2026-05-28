@@ -49,6 +49,12 @@ scenario:
   final_c_rate: 5.0
   step_time_s: 120.0
 
+sensor:
+  mode: perfect                    # perfect | downstream | sparse
+  # Set to "downstream" to simulate a realistic single-sensor PID:
+  # the controller reacts to cell[23] (hottest physical location) rather than
+  # the true global max, demonstrating sensor placement impact on control quality.
+
 controller:
   type: mpc         # override on command line: ./btm ... pid
   pid:
@@ -56,6 +62,7 @@ controller:
     ki: 0.002                      # but lags hard step transient → constraint violation
     setpoint_c: 33.0               # margin eroded by the 1C→5C step
     integrator_limit: 100.0
+    deadband_c: 0.0                # |error| < deadband_c treated as zero (0.0 = disabled)
   mpc:
     horizon_steps: 20
     setpoint_c: 34.9               # 0.1 °C below hard limit for numerical margin

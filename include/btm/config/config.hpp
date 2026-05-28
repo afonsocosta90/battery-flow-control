@@ -77,6 +77,14 @@ struct PidConfig {
     double ki{0.0};
     double setpoint_c{0.0};
     double integrator_limit{0.0};
+    double deadband_c{0.0};    ///< |error| < deadband_c is treated as zero (default: disabled)
+};
+
+/// Sensor / observability model configuration.
+/// Controls which cell temperatures the controller and logger treat as "observed".
+struct SensorConfig {
+    std::string      mode{"perfect"};   ///< "perfect" | "downstream" | "sparse"
+    std::vector<int> positions{};       ///< series-position indices for "sparse" mode
 };
 
 struct ScenarioConfig {
@@ -101,18 +109,19 @@ struct SimConfig {
 // Top-level configuration (the single source of truth at runtime)
 // -----------------------------------------------------------------------------
 struct Config {
-    CellParams        cell;
-    ModuleGeometry    module;
-    CoolantParams     coolant;
-    ConvectionParams  convection;
+    CellParams         cell;
+    ModuleGeometry     module;
+    CoolantParams      coolant;
+    ConvectionParams   convection;
     ThermalConstraints thermal_constraints;
-    PumpLimits        pump;
-    MpcConfig         mpc;
-    PidConfig         pid;
-    ScenarioConfig    scenario;
-    SimConfig         simulation;
+    PumpLimits         pump;
+    MpcConfig          mpc;
+    PidConfig          pid;
+    SensorConfig       sensor;          ///< observability model (default: perfect)
+    ScenarioConfig     scenario;
+    SimConfig          simulation;
 
-    std::string controller_type;       // "pid" or "mpc"
+    std::string controller_type;        ///< "pid" or "mpc"
 };
 
 // -----------------------------------------------------------------------------

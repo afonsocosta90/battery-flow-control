@@ -69,6 +69,7 @@ add_executable(btm_tests
     test/test_thermal_model.cpp
     test/test_pid_controller.cpp
     test/test_mpc_solver.cpp
+    test/test_sensor_model.cpp
     test/test_integration.cpp
 )
 target_link_libraries(btm_tests PRIVATE btm_core GTest::gtest_main)

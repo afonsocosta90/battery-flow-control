@@ -16,7 +16,8 @@ Simulator<Controller>::Simulator(model::ThermalModel& model,
                                  std::function<core::Current(core::Duration)> current_fn,
                                  std::function<core::Temperature(core::Duration)> inlet_fn,
                                  double T_max_constraint,
-                                 double dT_max_constraint)
+                                 double dT_max_constraint,
+                                 SensorModel sensor)
     : model_(model),
       controller_(controller),
       dt_(dt),
@@ -25,7 +26,8 @@ Simulator<Controller>::Simulator(model::ThermalModel& model,
       current_fn_(std::move(current_fn)),
       inlet_fn_(std::move(inlet_fn)),
       T_max_constraint_(T_max_constraint),
-      dT_max_constraint_(dT_max_constraint) {}
+      dT_max_constraint_(dT_max_constraint),
+      sensor_(std::move(sensor)) {}
 
 template <typename Controller>
 void Simulator<Controller>::run() {
@@ -59,7 +61,7 @@ void Simulator<Controller>::run() {
 
         state = model_.step(state, mdot, I_cell, T_inlet, dt_);
 
-        // Constraint check
+        // True physical state for constraint checking and metrics
         const double T_max = state.max_cell_temp().value;
         const double dT    = state.delta_t().value;
         if (T_max > T_max_constraint_ || dT > dT_max_constraint_) ++violations;
@@ -68,7 +70,11 @@ void Simulator<Controller>::run() {
         peak_dT       = std::max(peak_dT, dT);
         pump_integral += mdot.value * mdot.value * dt_.value;
 
-        logger.log(t.value, state, mdot, I_cell, T_inlet);
+        // Observed temperature for logging (may differ from true max when
+        // sensor mode is not "perfect").
+        const double T_max_observed = sensor_.observed_max(state).value;
+
+        logger.log(t.value, state, mdot, I_cell, T_inlet, T_max_observed);
 
         t.value += dt_.value;
         ++step;

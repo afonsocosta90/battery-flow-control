@@ -185,8 +185,10 @@ Config load_and_validate(const std::string& path) {
         cfg.pid.ki               = p["ki"].as<double>();
         cfg.pid.setpoint_c       = p["setpoint_c"].as<double>();
         cfg.pid.integrator_limit = p["integrator_limit"].as<double>();
+        cfg.pid.deadband_c       = p["deadband_c"] ? p["deadband_c"].as<double>() : 0.0;
         require_positive(cfg.pid.kp, "pid.kp");
         require_non_negative(cfg.pid.ki, "pid.ki");
+        require_non_negative(cfg.pid.deadband_c, "pid.deadband_c");
     } else if (cfg.controller_type == "pid") {
         throw std::runtime_error("Missing 'pid' section for controller.type = pid");
     }
@@ -216,6 +218,23 @@ Config load_and_validate(const std::string& path) {
         require_positive(cfg.mpc.solver.finite_diff_epsilon, "mpc.solver.finite_diff_epsilon");
     } else if (cfg.controller_type == "mpc") {
         throw std::runtime_error("Missing 'mpc' section for controller.type = mpc");
+    }
+
+    // --- sensor (optional; defaults to perfect / no positions) ---
+    if (auto s = root["sensor"]) {
+        cfg.sensor.mode = s["mode"] ? s["mode"].as<std::string>() : "perfect";
+        if (cfg.sensor.mode != "perfect" &&
+            cfg.sensor.mode != "downstream" &&
+            cfg.sensor.mode != "sparse") {
+            throw std::runtime_error(
+                "sensor.mode must be 'perfect', 'downstream', or 'sparse' (got '" +
+                cfg.sensor.mode + "')");
+        }
+        if (s["positions"]) {
+            for (const auto& pos : s["positions"]) {
+                cfg.sensor.positions.push_back(pos.as<int>());
+            }
+        }
     }
 
     // Cross-field sanity checks

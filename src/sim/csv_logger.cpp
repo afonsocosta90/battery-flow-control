@@ -17,9 +17,10 @@ CsvLogger::~CsvLogger() {
 void CsvLogger::log(double t, const model::ThermalState& state,
                     core::MassFlowRate mdot,
                     core::Current I_cell,
-                    core::Temperature T_inlet) {
+                    core::Temperature T_inlet,
+                    double t_max_observed) {
     if (!header_written_) {
-        file_ << "t,mdot,T_max,T_min,delta_T,I_cell,T_inlet\n";
+        file_ << "t,mdot,T_max,T_min,delta_T,I_cell,T_inlet,T_max_observed\n";
         header_written_ = true;
     }
 
@@ -34,7 +35,8 @@ void CsvLogger::log(double t, const model::ThermalState& state,
           << T_min << ","
           << dT << ","
           << I_cell.value << ","
-          << T_inlet.value << "\n";
+          << T_inlet.value << ","
+          << t_max_observed << "\n";
 }
 
 void CsvLogger::flush() {
